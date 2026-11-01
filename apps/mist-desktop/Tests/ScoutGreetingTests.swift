@@ -24,6 +24,13 @@ import CoreGraphics
         }
         let offset=CGRect(x:-1920,y:0,width:1920,height:1080)
         precondition(ScoutGreeting.destination(from:CGPoint(x:-1700,y:200),in:offset,pointsPerUnit:55).x < -1700)
+        let edge=ScoutGreeting.destination(from:CGPoint(x:100,y:200),in:area,pointsPerUnit:55)
+        let repeatSummon=ScoutGreeting(origin:CGPoint(x:edge.x-8,y:200),destination:edge,initialHeading:0,edgeHeading:-Double.pi/2)
+        precondition(repeatSummon.heading == -Double.pi/2,"already-at-left-edge must still face left")
+        let held=repeatSummon.pose(at:30,holdAtEdge:true)
+        precondition(held.pitch>0.6 && abs(held.heading+Double.pi/2)<0.001,"hold climb through the voice response")
+        let lowered=repeatSummon.pose(at:30,holdAtEdge:false)
+        precondition(lowered.pitch==0)
         print("PASS edge greeting: nearest side, lift only after arrival, bezel contact, controlled backdown and offset display")
     }
 }

@@ -98,7 +98,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {renderedWheelie=0;wheelieVelocity=0}
         else {
             wheelieVelocity+=((wheelieTarget-renderedWheelie)*100-wheelieVelocity*20)*dt
-            renderedWheelie=max(0,min(0.6,renderedWheelie+wheelieVelocity*dt))
+            renderedWheelie=max(0,min(0.85,renderedWheelie+wheelieVelocity*dt))
         }
         let target: Float = faceRequested && !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { lift=target;liftVelocity=0 }

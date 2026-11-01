@@ -6,7 +6,8 @@ struct ScoutGreeting {
     let destination:CGPoint
     let initialHeading:Double
     var pointsPerUnit=55.0
-    var heading:Double {destination.x<origin.x ? -.pi/2 : .pi/2}
+    var edgeHeading:Double?=nil
+    var heading:Double {edgeHeading ?? (destination.x<origin.x ? -.pi/2 : .pi/2)}
     var travel:Double {hypot(destination.x-origin.x,destination.y-origin.y)}
     var approach:Double {max(0.55,travel/480)}
     var duration:Double {0.3+approach+2.5}
@@ -19,9 +20,9 @@ struct ScoutGreeting {
         let left=area.minX+inset-150,right=area.maxX-inset-150
         return CGPoint(x:center<area.midX ? left : right,y:origin.y)
     }
-    func pose(at time:Double) -> (position:CGPoint,heading:Double,pitch:Double,distance:Double,moving:Bool) {
+    func pose(at time:Double,holdAtEdge:Bool=false) -> (position:CGPoint,heading:Double,pitch:Double,distance:Double,moving:Bool) {
         let roll=Self.smooth((time-0.3)/approach)
-        let contact=time-0.3-approach
+        let contact=holdAtEdge ? min(1.35,time-0.3-approach) : time-0.3-approach
         var turn=heading-initialHeading
         while turn > .pi {turn-=2 * .pi}
         while turn < -.pi {turn+=2 * .pi}

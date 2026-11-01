@@ -122,6 +122,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var driveTimer: Timer?
     private var ambientTimer: Timer?
     private var greetingTimer:Timer?
+    private var greetingRelease:Date?
+    private var greetingArrival:Date?
     private var wanderHome=CGPoint.zero
     private var nextWander=Date.distantFuture
     private var isWandering=false
@@ -207,7 +209,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func setupMenu() {
         let menu = NSMenu()
-        for (title, action, key) in [("Talk / interrupt · double Shift", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
+        for (title, action, key) in [("Summon / listen · double Shift", #selector(activateCompanion), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
         for (title,action) in [("Knock diagnostics…",#selector(knockDiagnostics)),("Preview Scout’s edge greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
@@ -343,8 +345,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if kind=="Lamps" {scout?.lamps=enabled};if kind=="Shadow" {scout?.shadow=enabled};if kind=="Tracks" {scout?.tracks=enabled}
         }
     }
-    private func activateCompanion() {
-        toggle();if conversationActive {greetScout()}
+    @objc private func activateCompanion() {
+        let keepGreeting=greetingTimer != nil && conversationActive && greetingRelease==nil
+        beginConversation(preserveGreeting:keepGreeting)
+        if conversationActive && !keepGreeting {greetScout()}
     }
     private func keyboardActivation(_ event:NSEvent) {
         inputEvents+=1
@@ -376,13 +380,19 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func endConversation(preserveGreeting:Bool=false) {
         conversationActive=false
         generation += 1; responseTask?.cancel(); responseTask = nil
-        if !preserveGreeting {parkRover()}
+        if !preserveGreeting {
+            if greetingTimer != nil,let arrival=greetingArrival,Date().timeIntervalSince(arrival)>0.5 {greetingRelease=Date()}
+            else {parkRover()}
+        }
         idleTimer?.invalidate(); idleTimer = nil
         audio.end(); scout?.faceRequested=false; update("idle", "Microphone off")
     }
     @objc private func toggle() {
-        if state == "listening" { stop(); return }
-        stop()
+        if state == "listening" {stop();return}
+        beginConversation()
+    }
+    private func beginConversation(preserveGreeting:Bool=false) {
+        endConversation(preserveGreeting:preserveGreeting)
         guard !permissionsPending else { return }
         permissionsPending = true
         conversationActive=true
@@ -503,7 +513,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     @objc private func parkRover() {
-        greetingTimer?.invalidate();greetingTimer=nil;scout?.wheeliePitch=0
+        greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
         rover.maximumSpeed=125;rover.acceleration=230
         driveTimer?.invalidate(); driveTimer = nil; driveRoute.removeAll(); rover.park()
@@ -563,19 +573,25 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let start=panel.frame.origin
         guard let area=(panel.screen ?? NSScreen.main)?.visibleFrame else {return}
         let scale=Double(scout?.uniforms(width:600,height:760)[2] ?? 55)
-        let motion=ScoutGreeting(origin:start,destination:ScoutGreeting.destination(from:start,in:area,pointsPerUnit:scale),initialHeading:rover.heading,pointsPerUnit:scale)
+        let destination=ScoutGreeting.destination(from:start,in:area,pointsPerUnit:scale)
+        let motion=ScoutGreeting(origin:start,destination:destination,initialHeading:rover.heading,pointsPerUnit:scale,edgeHeading:destination.x+150<area.midX ? -.pi/2 : .pi/2)
         let began=Date(),initialDistance=rover.distance
+        greetingRelease=nil;greetingArrival=began.addingTimeInterval(0.3+motion.approach)
+        let beganAsConversation=conversationActive
         greetingTimer=Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
             guard let self else {timer.invalidate();return}
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {self.parkRover();return}
-            let age=Date().timeIntervalSince(began),pose=motion.pose(at:age)
+            if beganAsConversation && !self.conversationActive && self.greetingRelease==nil {self.greetingRelease=Date()}
+            let age=self.greetingRelease.map {0.3+motion.approach+1.45+Date().timeIntervalSince($0)} ?? Date().timeIntervalSince(began)
+            let holding=self.conversationActive && self.greetingRelease==nil
+            let pose=motion.pose(at:age,holdAtEdge:holding)
             self.rover.position=pose.position;self.rover.heading=pose.heading
             self.rover.distance=initialDistance+pose.distance
             self.rover.speed=pose.moving ? 60 : 0
             self.panel.setFrameOrigin(pose.position);self.refreshControlPlacement();self.sendDrivePose()
             self.scout?.wheeliePitch=Float(pose.pitch)
-            if age>=motion.duration {
-                timer.invalidate();self.greetingTimer=nil;self.rover.park();self.sendDrivePose()
+            if age>=motion.duration && !holding {
+                timer.invalidate();self.greetingTimer=nil;self.greetingRelease=nil;self.greetingArrival=nil;self.rover.park();self.sendDrivePose()
                 self.wanderHome=pose.position;self.nextWander=Date().addingTimeInterval(7)
             }
         }
