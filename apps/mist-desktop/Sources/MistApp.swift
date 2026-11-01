@@ -7,6 +7,10 @@ import FoundationModels
 @main
 struct RoveMain {
     static func main() {
+        if CommandLine.arguments.contains("--scout-self-test") {
+            do { let renderer=try ScoutRenderer(frame:CGRect(x:0,y:0,width:300,height:380));try renderer.selfTest();exit(0) }
+            catch { print("FAIL: \(error)");exit(1) }
+        }
         if CommandLine.arguments.contains("--voice-self-test") {
             setbuf(stdout, nil)
             Task { @MainActor in
@@ -34,6 +38,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var panel: NSPanel!
     private var web: WKWebView!
     private var handheld: HandheldRenderer?
+    private var scout: ScoutRenderer?
+    private var lidMenuItem: NSMenuItem?
     private let audio = LocalConversation()
     private let motion = MotionSensor()
     private var detector = TapDetector()
@@ -104,6 +110,14 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for (title,action) in [("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(parkRover))] {
             let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
+        let camera=NSMenuItem(title:"Scout viewpoint",action:nil,keyEquivalent:"")
+        let cameraMenu=NSMenu()
+        for cm in [45,55,70] {
+            let item=NSMenuItem(title:"Viewing distance: \(cm) cm",action:#selector(setViewingDistance(_:)),keyEquivalent:"")
+            item.target=self;item.tag=cm;cameraMenu.addItem(item)
+        }
+        let hinge=NSMenuItem(title:"Follow lid angle (experimental)",action:#selector(toggleLid(_:)),keyEquivalent:"")
+        hinge.target=self;lidMenuItem=hinge;cameraMenu.addItem(hinge);camera.submenu=cameraMenu;menu.addItem(camera)
         let companions = NSMenuItem(title: "Companion", action: nil, keyEquivalent: "")
         let choices = NSMenu()
         for (title, id) in [("White handheld + sticky hand", "handheld"), ("Pixel face", "character"), ("Orbloom", "orb"), ("Scout · Casting Room", "scout")] {
@@ -125,16 +139,37 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         panel.setFrameOrigin(bounded(panel.frame.origin))
         rover.position = panel.frame.origin
         ready = false
+        scout?.view.isPaused=true;scout?.view.removeFromSuperview();scout=nil;lidMenuItem?.state = .off
         handheld?.view.isPaused = true; handheld?.view.removeFromSuperview(); handheld = nil
+        if id == "scout", let host=panel.contentView {
+            do { let renderer=try ScoutRenderer(frame:host.bounds);host.addSubview(renderer.view,positioned:.below,relativeTo:web);scout=renderer
+                let saved=UserDefaults.standard.double(forKey:"scoutViewingDistance");renderer.viewingDistance=[450.0,550,700].contains(saved) ? saved : 550
+                lidMenuItem?.state=renderer.followLid(UserDefaults.standard.object(forKey:"scoutFollowLid") as? Bool ?? true) ? .on : .off }
+            catch { NSLog("Rove Scout Metal unavailable: %@",error.localizedDescription) }
+        }
         if id == "handheld", let host = panel.contentView {
             do { let renderer = try HandheldRenderer(frame:host.bounds); host.addSubview(renderer.view,positioned:.below,relativeTo:web); handheld = renderer }
             catch { NSLog("Rove handheld renderer unavailable: %@",error.localizedDescription) }
         }
+        web.configuration.userContentController.removeAllUserScripts()
+        web.configuration.userContentController.addUserScript(WKUserScript(source:"window.ROVE_NATIVE_SCOUT=\(scout != nil)",injectionTime:.atDocumentStart,forMainFrameOnly:true))
         if let url = Bundle.main.url(forResource: id, withExtension: "html") { web.loadFileURL(url, allowingReadAccessTo: url.deletingLastPathComponent()) }
     }
     @objc private func chooseCompanion(_ item: NSMenuItem) {
         guard let id = item.representedObject as? String else { return }
         UserDefaults.standard.set(id, forKey: "companion"); loadCompanion()
+    }
+    @objc private func setViewingDistance(_ item:NSMenuItem) {
+        UserDefaults.standard.set(Double(item.tag)*10,forKey:"scoutViewingDistance")
+        scout?.viewingDistance=Double(item.tag)*10
+    }
+    @objc private func toggleLid(_ item:NSMenuItem) {
+        guard let scout else {return}
+        let enabled=item.state != .on
+        let available=scout.followLid(enabled)
+        UserDefaults.standard.set(enabled,forKey:"scoutFollowLid")
+        item.state=enabled && available ? .on : .off
+        if enabled && !available {update("error","Lid angle unavailable. Using the fixed viewpoint.")}
     }
     @objc private func screenAccess() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
@@ -228,6 +263,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func update(_ next: String, _ text: String) {
         state = next
         handheld?.state = next
+        scout?.state = next
         statusItem?.button?.toolTip = "Rove: \(next). \(text)"
         guard ready, let data = try? JSONSerialization.data(withJSONObject: [next, text]), let json = String(data: data, encoding: .utf8) else { return }
         web.evaluateJavaScript("window.mistState(...\(json))", completionHandler: nil)
@@ -235,7 +271,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
         guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
         switch type {
-        case "ready": ready = true; update(state, state == "speaking" ? reply : "Double-tap or press Talk")
+        case "ready": ready = true; update(state, state == "speaking" ? reply : "Double-tap or press Talk"); web.evaluateJavaScript("window.roveNativeScout?.(\(scout != nil))",completionHandler:nil); sendDrivePose()
         case "pose":
             if let u = body["u"] as? [String:Any] {
                 var pose = [String:Float]()
@@ -306,6 +342,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func sendDrivePose() {
         guard ready,companionID == "scout" else { return }
+        scout?.heading=Float(rover.heading);scout?.distance=Float(rover.distance);scout?.moving=rover.speed>1
         web.evaluateJavaScript("window.roveDrive?.(\(rover.heading),\(rover.speed),\(rover.distance))",completionHandler:nil)
     }
     private func move(_ dx: Double, _ dy: Double) {

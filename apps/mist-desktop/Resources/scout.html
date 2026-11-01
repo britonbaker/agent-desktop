@@ -2979,14 +2979,15 @@ document.addEventListener('click', e => {
   if (e.target.closest('#pillMic,#key2,#listen')) { e.preventDefault(); e.stopImmediatePropagation(); nativePost('toggle'); }
 }, true);
 document.addEventListener('keydown', e => { if(e.key === 'Escape') nativePost('stop'); },true);
-let nativeDrag = null;
-fc.addEventListener('pointerdown', e => { nativeDrag = {x:e.screenX,y:e.screenY}; fc.setPointerCapture(e.pointerId); nativePost('dragStart'); });
-fc.addEventListener('pointermove', e => { if(nativeDrag) { nativePost('drag',{dx:e.screenX-nativeDrag.x,dy:e.screenY-nativeDrag.y}); nativeDrag={x:e.screenX,y:e.screenY}; }});
-fc.addEventListener('pointerup', () => { nativeDrag=null; nativePost('dragEnd'); });
+let nativeDrag = null, scoutDragDistance=0;
+fc.addEventListener('pointerdown', e => { scoutDragDistance=0; nativeDrag = {x:e.screenX,y:e.screenY}; fc.setPointerCapture(e.pointerId); nativePost('dragStart'); });
+fc.addEventListener('pointermove', e => { if(nativeDrag) { scoutDragDistance+=Math.hypot(e.screenX-nativeDrag.x,e.screenY-nativeDrag.y); nativePost('drag',{dx:e.screenX-nativeDrag.x,dy:e.screenY-nativeDrag.y}); nativeDrag={x:e.screenX,y:e.screenY}; }});
+fc.addEventListener('pointerup', () => { const clicked=nativeDrag&&scoutDragDistance<5;nativeDrag=null; nativePost('dragEnd');if(clicked)nativePost('toggle'); });
 fc.addEventListener('pointercancel', () => { nativeDrag=null; nativePost('dragEnd'); });
 nativePost('ready');
 
-window.scoutMode=true;fc.style.opacity='0';
+window.nativeScout=!!window.ROVE_NATIVE_SCOUT;window.roveNativeScout=(active)=>{window.nativeScout=active;scoutCanvas.style.display=ground.style.display=lamps.style.display=active?'none':'';if(active)scoutGPU?.gl.getExtension('WEBGL_lose_context')?.loseContext();};
+window.scoutMode=true;fc.style.opacity='1';fc.setAttribute('role','button');fc.setAttribute('aria-label','Talk to Scout');fc.tabIndex=0;fc.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nativePost('toggle');}});
 const roverStyle=document.createElement('style');
 roverStyle.textContent='html.app{--pw:100vw;--head:54px;--ph:250px;--bar:310px}#scoutGround{position:fixed;inset:0;width:300px;height:380px;pointer-events:none}.float{z-index:4}.think,.pill,.saywrap{z-index:8}.think .bub{-webkit-line-clamp:2;font-size:12px;padding:8px 10px}.think .bub .src{display:none}';document.head.appendChild(roverStyle);
 const ground=document.createElement('canvas');ground.id='scoutGround';ground.width=600;ground.height=760;document.body.appendChild(ground);
@@ -2997,13 +2998,14 @@ window.roveDrive=(heading,speed,distance)=>{driveHeading=heading;driveSpeed=spee
 const scoutCanvas=document.createElement('canvas');
 scoutCanvas.style.cssText='position:fixed;left:65px;top:105px;width:170px;height:148.75px;pointer-events:none;z-index:3;filter:drop-shadow(0 3px 2px rgba(0,0,0,.55))';
 document.body.appendChild(scoutCanvas);
-const scoutGPU=CastingGL.open(scoutCanvas),scoutModel={set:'objects',id:'scout'},scoutEntry={};
+const scoutGPU=window.nativeScout?null:CastingGL.open(scoutCanvas),scoutModel={set:'objects',id:'scout'},scoutEntry={};
 let scoutMode=0,scoutSince=performance.now()/1000,scoutLast=0;
 const priorState=window.mistState;
 window.mistState=(state,text)=>{priorState(state,text);scoutMode=({idle:0,listening:1,thinking:2,speaking:3})[state]??0;scoutSince=performance.now()/1000;};
 function scoutFrame(now){
+ if(window.nativeScout)return;
  requestAnimationFrame(scoutFrame);
- if(document.hidden||!scoutGPU||now-scoutLast<(scoutMode===0&&driveSpeed<1?80:50))return;
+ if(window.nativeScout||document.hidden||!scoutGPU||now-scoutLast<(scoutMode===0&&driveSpeed<1?80:50))return;
  scoutLast=now;scoutGPU.begin();const programs=scoutGPU.getPrograms(scoutModel);if(!programs.ready)return;
  const w=288,h=252;
  const pose={mode:scoutMode,age:now/1000-scoutSince,time:now/1000,yaw:-.49,pitch:.92,turnX:0,turnY:0,distance:driveDistance,lookX:0,lookY:0,reduced:matchMedia('(prefers-reduced-motion: reduce)').matches,detail:true,moving:driveSpeed>1};
