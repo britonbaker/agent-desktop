@@ -6,7 +6,15 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     let view: MTKView
     var state = "idle" { didSet { if oldValue != state { entered = Date() } } }
     var heading: Float = 0
-    var distance: Float = 0
+    var distance: Float = 0 {didSet {if abs(distance-oldValue)>0.001 {lastMoved=Date()}}}
+    private var lastMoved=Date.distantPast
+    var optics=UserDefaults.standard.object(forKey:"scoutOptics") as? Int ?? 4
+    var paint=UserDefaults.standard.integer(forKey:"scoutPaint")
+    var face=UserDefaults.standard.integer(forKey:"scoutFace")
+    var lamps=UserDefaults.standard.object(forKey:"scoutLamps") as? Bool ?? true
+    var shadow=UserDefaults.standard.object(forKey:"scoutShadow") as? Bool ?? true
+    var tracks=UserDefaults.standard.object(forKey:"scoutTracks") as? Bool ?? true
+    var lampLift:Float=UserDefaults.standard.object(forKey:"scoutLampLift") as? Float ?? 1
     var moving = false
     var wheeliePitch:Float=0
     var faceRequested = false
@@ -75,7 +83,9 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
                 heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
-                Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0]
+                Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0,
+                Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
+                lampLift,shadow ? 1 : 0,tracks ? Float(Date().timeIntervalSince(lastMoved)<1.25 ? exp(-max(0,Date().timeIntervalSince(lastMoved))/0.28) : 0) : 0,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
@@ -109,22 +119,23 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20)] {
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("tracks",0,150)] {
             let w=600,h=760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
-            if name.hasPrefix("drive-") {values[10]=7}
+            if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
+            if name=="tracks" {values[10]=7;values[22]=1;values[19]=0}
             encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
             if let error=command.error {throw error}
             var raw=[UInt16](repeating:0,count:w*h*4)
             raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
-            guard let bitmap=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:w,pixelsHigh:h,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:w*4,bitsPerPixel:32),let output=bitmap.bitmapData else {throw NSError(domain:"ScoutPreview",code:2)}
+            guard let bitmap=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:w,pixelsHigh:h,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bitmapFormat:.alphaNonpremultiplied,bytesPerRow:w*4,bitsPerPixel:32),let output=bitmap.bitmapData else {throw NSError(domain:"ScoutPreview",code:2)}
             for index in 0..<(w*h*4) {
                 let value=max(0,Float(Float16(bitPattern:raw[index])))
                 let alpha=min(1,max(0,Float(Float16(bitPattern:raw[(index/4)*4+3]))))
-                let encoded=index%4==3 ? alpha : alpha*pow(min(1,value/max(alpha,0.00001)),1/2.2)
+                let encoded=index%4==3 ? alpha : pow(min(1,value/max(alpha,0.00001)),1/2.2)
                 output[index]=UInt8(min(255,max(0,encoded*255)))
             }
             guard let png=bitmap.representation(using:.png,properties:[:]) else {throw NSError(domain:"ScoutPreview",code:3)}
@@ -134,6 +145,15 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let changed=zip(wheelFrames[0],wheelFrames[1]).filter {abs(Int($0.0)-Int($0.1))>8}.count
         guard changed>100 else {throw NSError(domain:"ScoutPreview",code:4,userInfo:[NSLocalizedDescriptionKey:"Wheel travel did not change the render"])}
         print("PASS authored wheel rotation:",changed,"channels changed from travel alone")
+        for style in 0...7 {
+            let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:300,height:380,mipmapped:false)
+            desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
+            guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreset",code:1)}
+            var values=uniforms(width:300,height:380);values[16]=Float(style);values[22]=1;values[9]=100
+            encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
+            if let error=command.error {throw error}
+        }
+        print("PASS all eight authored optics and roof presets compiled/rendered")
         print("Wrote rear-axle greeting previews:",directory)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.

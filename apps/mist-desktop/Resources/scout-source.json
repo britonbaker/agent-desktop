@@ -5,9 +5,12 @@
   "body_sha256": "653e31cc245b18550019641e256bb4c28d08f39f99fa9e3f0b40ab0262a57aef",
   "face_sha256": "751c085a84916156a715a618328c1e99030dac675cb6e0881554c229b3f0ffe2",
   "adaptations": [
-    "Native display-plane camera and EDR output",
-    "Wheel rotation follows desktop travel distance",
-    "Rear-axle knock greeting",
-    "Original floor receiver replaced by native desktop contact shadow"
-  ]
+    "Native display-plane camera and extended-range output",
+    "Authored studio geometry, faces, paint, optical distributions and roof instruments",
+    "Wheel and tread phase follow desktop travel",
+    "Authored floor shadow and short tire-track receiver composited transparently on desktop",
+    "Studio beam intensity reduced for readable desktop overlays",
+    "Rear-axle edge greeting"
+  ],
+  "studio_sha256": "c046254f3ed52d9a88e29dba416aaa56cd2da779c22d2bab3ad69db56984a15c"
 }

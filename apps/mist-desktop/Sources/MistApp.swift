@@ -136,6 +136,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var velocity = NSPoint.zero
     private var lastDrag = Date()
     private var monitor: Any?
+    private var globalShiftMonitor:Any?
+    private var doubleShift=DoubleShift()
+    private var tapPeaks:[String]=[]
+    private var lastMotionSample=0.0
+    private var acceptedKnocks=0
     private var ready = false
     private var lastExternalApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
     private var lastExternalPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
@@ -187,18 +192,20 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 }
             }
         }
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            if event.keyCode == 53 { self?.stop(); return nil }; return event
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown,.flagsChanged]) { [weak self] event in
+            self?.keyboardActivation(event)
+            if event.type == .keyDown && event.keyCode == 53 { self?.stop(); return nil }; return event
         }
+        globalShiftMonitor=NSEvent.addGlobalMonitorForEvents(matching:[.keyDown,.flagsChanged]) { [weak self] event in self?.keyboardActivation(event) }
         enableTaps()
         ambientTimer=Timer.scheduledTimer(withTimeInterval:0.1,repeats:true) { [weak self] _ in self?.ambientTick() }
     }
     private func setupMenu() {
         let menu = NSMenu()
-        for (title, action, key) in [("Talk / interrupt", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
+        for (title, action, key) in [("Talk / interrupt · double Shift", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
-        for (title,action) in [("Preview Scout’s edge greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
+        for (title,action) in [("Knock diagnostics…",#selector(knockDiagnostics)),("Preview Scout’s edge greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
             let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
         let wander=NSMenuItem(title:"Let Scout wander",action:#selector(toggleWandering(_:)),keyEquivalent:"")
@@ -218,6 +225,27 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             item.target = self; item.representedObject = id; choices.addItem(item)
         }
         companions.submenu = choices; menu.insertItem(companions, at: 0)
+        let studio=NSMenuItem(title:"Scout studio",action:nil,keyEquivalent:"")
+        let studioMenu=NSMenu();studio.submenu=studioMenu
+        for (title,kind,names) in [
+            ("Lights and roof","Optics",["Factory original","Rally twins","Ribbon","Survey projectors","Inset navigator + folding Ribbon","Mast gauge","Scanline","Rangefinder"]),
+            ("Shell paint","Paint",["Titanium","Signal Red","Lunar Rover","Cobalt Blue"]),
+            ("Pixel face","Face",["Original","Binocular","Waypoint","Sweep","Buddy"])] {
+            let group=NSMenuItem(title:title,action:nil,keyEquivalent:""),sub=NSMenu();group.submenu=sub
+            let selected=UserDefaults.standard.object(forKey:"scout"+kind) as? Int ?? (kind=="Optics" ? 4 : 0)
+            for (index,name) in names.enumerated() {
+                let item=NSMenuItem(title:name,action:#selector(chooseScoutFeature(_:)),keyEquivalent:"")
+                item.target=self;item.representedObject=kind+":"+String(index);item.state=index==selected ? .on : .off;sub.addItem(item)
+            }
+            studioMenu.addItem(group)
+        }
+        for (title,kind) in [("Lights on","Lamps"),("Ground shadow","Shadow"),("Tire tracks","Tracks"),("Lightbar raised","LampLift")] {
+            let item=NSMenuItem(title:title,action:#selector(chooseScoutFeature(_:)),keyEquivalent:"")
+            item.target=self;item.representedObject=kind
+            let value=UserDefaults.standard.object(forKey:"scout"+kind)
+            item.state=(value as? Bool ?? ((value as? Float ?? 1)>0.5)) ? .on : .off;studioMenu.addItem(item)
+        }
+        menu.addItem(studio)
         let screenImage=NSMenuItem(title:"Screen image access…",action:#selector(screenImageAccess),keyEquivalent:"")
         screenImage.target=self;menu.addItem(screenImage)
         let access = NSMenuItem(title: "Screen reading access…", action: #selector(screenAccess), keyEquivalent: "")
@@ -284,13 +312,48 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         detector.threshold = threshold
         motion.onSample = { [weak self] time, strength, age in
             guard let self else { return }
+            self.lastMotionSample=time
+            if strength>=self.detector.threshold*0.5 {
+                self.tapPeaks.append(String(format:"%.4f · %.2f seconds since keyboard",strength,age));self.tapPeaks=Array(self.tapPeaks.suffix(12))
+            }
             if self.detector.update(time: time, strength: strength, keyboardAge: age) {
+                self.acceptedKnocks+=1
                 NSLog("Rove: double tap accepted")
-                self.toggle()
-                if self.conversationActive {self.greetScout()}
+                self.activateCompanion()
             }
         }
         do { try motion.start() } catch { update("error", error.localizedDescription) }
+    }
+    @objc private func chooseScoutFeature(_ item:NSMenuItem) {
+        guard let value=item.representedObject as? String else {return}
+        let pieces=value.split(separator:":"),kind=String(pieces[0])
+        if pieces.count==2,let index=Int(pieces[1]) {
+            UserDefaults.standard.set(index,forKey:"scout"+kind)
+            for other in item.menu?.items ?? [] {other.state=other===item ? .on : .off}
+            if kind=="Optics" {scout?.optics=index};if kind=="Paint" {scout?.paint=index};if kind=="Face" {scout?.face=index}
+        } else {
+            let enabled=item.state != .on;item.state=enabled ? .on : .off
+            if kind=="LampLift" {UserDefaults.standard.set(Float(enabled ? 1 : 0),forKey:"scout"+kind);scout?.lampLift=enabled ? 1 : 0}
+            else {UserDefaults.standard.set(enabled,forKey:"scout"+kind)}
+            if kind=="Lamps" {scout?.lamps=enabled};if kind=="Shadow" {scout?.shadow=enabled};if kind=="Tracks" {scout?.tracks=enabled}
+        }
+    }
+    private func activateCompanion() {
+        toggle();if conversationActive {greetScout()}
+    }
+    private func keyboardActivation(_ event:NSEvent) {
+        if event.type == .keyDown {doubleShift.typed(at:event.timestamp);return}
+        guard event.keyCode==56 || event.keyCode==60 else {
+            doubleShift.typed(at:event.timestamp);return
+        }
+        let other = !event.modifierFlags.intersection([.command,.control,.option]).isEmpty
+        if doubleShift.changed(at:event.timestamp,held:event.modifierFlags.contains(.shift),otherModifier:other) {activateCompanion()}
+    }
+    @objc private func knockDiagnostics() {
+        let age=lastMotionSample>0 ? String(format:"%.1f",ProcessInfo.processInfo.systemUptime-lastMotionSample) : "no"
+        let alert=NSAlert();alert.messageText="Rove knock diagnostics"
+        alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
+        alert.addButton(withTitle:"Done");alert.runModal()
     }
     @objc private func explainWindow() { respond("Explain the page or window I am looking at. Start with its main content and what I can do next.") }
     @objc private func showLastReply() {
@@ -554,6 +617,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         stop(); motion.stop(); tossTimer?.invalidate(); ambientTimer?.invalidate(); parkRover()
         Task {await LocalVision.shared.stop()}
         if let monitor { NSEvent.removeMonitor(monitor) }
+        if let globalShiftMonitor {NSEvent.removeMonitor(globalShiftMonitor)}
         if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
     }
 }

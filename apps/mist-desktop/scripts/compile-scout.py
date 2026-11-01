@@ -1,138 +1,111 @@
 #!/usr/bin/env python3
-"""Reuse Casting Room Scout geometry in the native Metal renderer.
-Requires Khronos glslangValidator and spirv-cross on PATH.
-"""
-import json, pathlib, re, subprocess, tempfile
-root = pathlib.Path(__file__).resolve().parents[1]
-s = (root/'Resources/scout-shaders.js').read_text()
-lib = json.loads(s[s.index('=')+1:].rstrip(';\n '))
-body = lib['objects']['scout']['body']
-# Keep the original geometry and materials. Replace only the portrait camera,
-# add two small front-edge lamps, and preserve linear extended-range output.
-body = body.replace('return clamp(pow(max(linear,vec3(0.)),vec3(.45455)),0.,1.);','return max(linear,vec3(0.));')
-body = re.sub(r'void scCamera\(.*?\n}\n', '''vec3 worldToScout(vec3 p) {
-    // Heading about the screen normal, followed by the physical pickup tilt.
-    float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
-    float c=cos(heading),s=sin(heading);
-    p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
-    float a=U.pose.w*1.5707963+U.options.z,cx=cos(a),sx=sin(a);
-    return vec3(p.x,cx*p.y-sx*p.z,sx*p.y+cx*p.z);
-}
-void scCamera(vec2 uv,vec2 orbit,out vec3 ro,out vec3 rd) {
-    vec3 ground=vec3(uv.x,-.767,uv.y);
-    vec3 eye=U.eye.xyz;
-    ro=worldToScout(eye-vec3(0.,U.pose.w*1.05,0.));
-    // Rotate the chassis around the rear axle; ray directions get no translation.
-    float a=U.options.z,c=cos(a),s=sin(a);
-    vec3 pivot=vec3(0.,-.472,-.431);
-    ro+=pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z);
-    rd=worldToScout(normalize(ground-eye));
-}
-''',body,flags=re.S)
-# The source's kit has real rotating rim bores, hub marks and tire chevrons.
-body=body.replace('scKitRoll=scKitOn && mode==7.?angle-.106*sin(angle):0.;','scKitRoll=U.pose.y/(U.viewport.z*.295);')
-body=re.sub(r'uniform float (uFinish|uStyle|uRough);','',body)
-body=re.sub(r'vec3 galleryMiss\(.*?\n}\n', 'vec3 galleryMiss(vec2 uv,vec3 ro,vec3 rd,float age){objectCoverage=0.;return vec3(0.); }\n',body,flags=re.S)
-body=body.replace('min(-c+sqrt(disc),galleryFloorDepth(ro,rd))','-c+sqrt(disc)')
+"""Compile the authored Scout studio geometry, optics and floor effects for native EDR."""
+import pathlib,re,subprocess,tempfile
+root=pathlib.Path(__file__).resolve().parents[1]
+original=(root/'Resources/scout-study-source.glsl').read_text()
+body=original[:original.index('// 5 x 7 column masks')]
 body=re.sub(r'\bpatch\b','groundPatch',body)
-roof = """int roofGlyph(int code){
- if(code==65)return 11245;
- if(code==68)return 27502;
- if(code==69)return 31143;
- if(code==72)return 23533;
- if(code==73)return 29847;
- if(code==75)return 23469;
- if(code==76)return 18727;
- if(code==78)return 24573;
- if(code==79)return 31599;
- if(code==82)return 27565;
- if(code==83)return 31183;
- if(code==84)return 29842;
- if(code==89)return 23186;
- return 0;
+body=re.sub(r'^precision .*?;\n|^uniform .*?;\n','',body,flags=re.M)
+body=body.replace('smoothstep(1.78,3.055,max(0.,rear))','smoothstep(.25,1.10,max(0.,rear))')
+body=body.replace('scKitRoll=scKitOn && mode==7.?angle-.106*sin(angle):0.;','scKitRoll=U.pose.y/(U.viewport.z*.295);')
+body=re.sub(r'float scoutTravel\(float age\)\{.*?\n}', 'float scoutTravel(float age){return max(0.,U.pose.y/U.viewport.z);}',body,flags=re.S)
+camera='''vec3 worldToScout(vec3 p) {
+ float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
+ float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
+ float a=U.pose.w*1.5707963+U.options.z,cx=cos(a),sx=sin(a);
+ return vec3(p.x,cx*p.y-sx*p.z,sx*p.y+cx*p.z);
 }
-int roofLetter(int index){
- if(U.pose.z<.5){int word[5]=int[5](82,69,65,68,89);return index<5?word[index]:0;}
- if(U.pose.z<1.5){int word[6]=int[6](76,73,83,84,69,78);return word[index];}
- if(U.pose.z<2.5){int word[5]=int[5](84,72,73,78,75);return index<5?word[index]:0;}
- if(U.pose.z<3.5){int word[4]=int[4](84,65,76,75);return index<4?word[index]:0;}
- int word[5]=int[5](69,82,82,79,82);return index<5?word[index]:0;
+vec3 scoutPoint(vec3 p){
+ p=worldToScout(p-vec3(0.,U.pose.w*1.05,0.));
+ float a=U.options.z,c=cos(a),s=sin(a);vec3 pivot=vec3(0.,-.472,-.431);
+ return p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z);
 }
-vec3 scRoof(vec3 p){
- vec2 surface=(p.xz-vec2(0.,.20))/vec2(.80,.26)+.5;
- vec2 pixel=vec2(surface.x*26.,(1.-surface.y)*9.);
- ivec2 cell=ivec2(floor(pixel));
- int count=U.pose.z<.5?5:U.pose.z<1.5?6:U.pose.z<2.5?5:U.pose.z<3.5?4:5;
- int x=cell.x-(26-(count*4-1))/2,y=cell.y-2;
- float dotInk=0.;
- if(x>=0&&x<count*4&&y>=0&&y<5&&x%4<3){
-   int bit=14-(y*3+x%4);
-   dotInk=float((roofGlyph(roofLetter(x/4))>>bit)&1);
- }
- vec2 dotUV=fract(pixel)-.5;
- float aperture=1.-smoothstep(.34,.48,max(abs(dotUV.x),abs(dotUV.y)));
- vec3 glass=vec3(.012,.021,.023);
- vec3 phosphor=vec3(.89,.626,.245);
- return glass+phosphor*dotInk*aperture*1.35;
+void scCamera(vec2 uv,vec2 orbit,out vec3 ro,out vec3 rd){
+ vec3 ground=vec3(uv.x,-.767,uv.y);ro=scoutPoint(U.eye.xyz);rd=worldToScout(normalize(ground-U.eye.xyz));
 }
-"""
-source='''#version 450
+'''
+body=re.sub(r'void scCamera\(.*?\n}\n',camera,body,flags=re.S)
+extra=original[original.index('vec2 studySDF('):original.index('vec3 studyAir(')]
+extra+=original[original.index('vec3 studyGlare('):original.index('float faceMode(')]
+header='''#version 450
 layout(location=0) out vec4 outputColor;
 layout(set=0,binding=0,std140) uniform NativeUniforms {
- vec4 viewport; // drawable width/height, points per model unit, backing ratio
- vec4 eye;      // eye relative to rover in model units, seconds
- vec4 pose;     // heading, wheel distance, face mode, pickup fraction
- vec4 options;  // state age, HDR headroom, rear-axle wheelie radians, unused
+ vec4 viewport; vec4 eye; vec4 pose; vec4 options;
+ vec4 outfit; // optics, paint, face, lamp power
+ vec4 mechanics; // lamp hinge, shadow enabled, track fade, unused
 } U;
 #define uResolution U.viewport.xy
-#define uDriveDistance U.pose.y
 #define uEvent U.pose.z
 #define uSince U.options.x
 #define uTime U.eye.w
-#define uFinish 0.
-#define uStyle 0.
-#define uRough 0.
-'''+roof+lib['objects']['scout']['face']+body+'''
+#define uFinish U.outfit.z
+#define uStyle U.outfit.y
+#define uRough U.mechanics.y
+#define uLook vec2(0.)
+#define uReduce 0.
+'''
+main='''
 void main(){
- // A pixel is a real point on the display, not a rotated portrait quad.
  vec2 pixel=vec2(gl_FragCoord.x,U.viewport.y-gl_FragCoord.y)/U.viewport.w;
  vec2 uv=(pixel-vec2(150.,200.))/U.viewport.z;
- vec3 color=renderBot(uv,U.pose.z,U.options.x,U.eye.w,vec2(0.),vec2(0.));
- float coverage=objectCoverage;
- // Ground-plane contact shadows and light pools use the same physical rays.
+ float style=U.outfit.x;bool kit=style>=3.5;
+ kitLift=U.mechanics.x;scKitPose(kit?1.:0.,U.pose.z,U.options.x);
+ float power=U.outfit.w*(kit?liftLampGain():1.);if(style<.5)power=0.;
+ vec3 ro,rd;scCamera(uv,vec2(0.),ro,rd);
+ float along=dot(ro,rd),disc=along*along-dot(ro,ro)+3.24,depth=10000.;vec2 hit=vec2(0.);
+ if(disc>0.){
+  float t=max(0.,-along-sqrt(disc)),end=-along+sqrt(disc);
+  for(int i=0;i<112;i++){
+   vec2 probe=studySDF(ro+rd*t,style);
+   if(probe.x<.00075){hit=probe;depth=t;break;}
+   t+=max(.00042,probe.x*.74);if(t>end)break;
+  }
+ }
+ vec3 color=vec3(0.);float coverage=hit.y>.5?1.:0.;
+ if(coverage>0.){
+  vec3 p=ro+rd*depth,n=studyNormal(p,style),v=-rd;
+  if(hit.y==3.&&n.z>.94)color=scLCD(p+v*((scGlass-p.z)/v.z),v,scKitFaceMode(U.pose.z),U.options.x,vec2(0.));
+  else if(hit.y>=110.){
+   color=kitDisplaySurface(p,n,v,hit.y,style);
+   if(kitDisplayLiveGlass(p,n,hit.y,style))color=kitDisplayGlassRay(ro,rd,style);
+  }else if(hit.y>=40.)color=kitPaintFinish(p,n,v,hit.y,liftLampSurface(p,n,v,hit.y,power),uStyle);
+  else if(hit.y>=19.5)color=headFinish(p,n,v,hit.y,style,power);
+  else color=kitPaintFinish(p,n,v,hit.y,scHousing(p,n,v,hit.y),uStyle)+headBounce(p,n,style,power);
+  color+=studyGlare(ro,rd,depth,style,power);
+ }
+ // Use the source's tire lugs and chassis shadow on a transparent display receiver.
  float c=cos(U.pose.x),s=sin(U.pose.x);
- vec2 p=vec2(c*uv.x-s*uv.y,s*uv.x+c*uv.y);
- float shadow=(.26*exp(-dot(p/vec2(.82,.65),p/vec2(.82,.65))))*(1.-.65*U.pose.w);
- for(int x=-1;x<=1;x+=2)for(int z=-1;z<=1;z+=2){
-   vec2 d=(p-vec2(float(x)*.69,float(z)*.43))/vec2(.21,.19);
-   shadow+=.36*exp(-dot(d,d)*2.)*(1.-U.pose.w)*(z>0?exp(-U.options.z*5.):1.);
+ vec2 floorPoint=vec2(c*uv.x-s*uv.y,s*uv.x+c*uv.y);
+ float detail=clamp(U.viewport.z/55.,.1,1.);
+ float shade=.45*scoutCastOpacity(floorPoint)*(1.-.35*U.pose.w)*(floorPoint.y>0.?exp(-U.options.z*3.):1.);
+ float dust=.83*scoutTreadCoverage(floorPoint,7.,max(1.,U.options.x),detail)*U.mechanics.z;
+ float floorAlpha=shade+(1.-shade)*dust;
+ vec3 floorRGB=vec3(.003,.005,.008)*shade+vec3(.119,.113,.094)*dust*(1.-shade);
+ // Each authored angular beam originates at its real lens, including hinge and chassis tilt.
+ vec3 floorLocal=scoutPoint(vec3(uv.x,-.767,uv.y));
+ vec3 floorNormal=worldToScout(vec3(0.,1.,0.)),light=vec3(0.);
+ if(power>0.)for(int k=0;k<2;k++){
+  float side=k==0?-1.:1.;vec3 d=floorLocal-studyLampOrigin(style,side);
+  float d2=dot(d,d);vec3 ray=d*inversesqrt(max(.0001,d2));
+  vec3 opticRay=kit?liftLampReferenceDirection(ray):ray;
+  float e=sfCandela(opticRay,kit?2.:style,side)*max(dot(-ray,floorNormal),0.)/(d2+.055);
+  light+=vec3(.245,.250,.258)*e*headTint(style)*power;
  }
- float beam=0.;
- for(int i=-1;i<=1;i+=2){
-   vec2 d=p-vec2(float(i)*.46,.60);
-   float width=.06+max(0.,d.y)*.31;
-   beam+=exp(-pow(d.x/width,2.)*2.)*exp(-max(0.,d.y)*2.)*smoothstep(0.,.06,d.y);
- }
- float lightAlpha=beam*.20*(1.-U.pose.w)*exp(-U.options.z*6.);
- float groundAlpha=clamp(shadow+lightAlpha,0.,.8);
- vec3 groundRGB=vec3(1.4,1.25,.82)*lightAlpha;
- vec3 rgb=color*coverage+groundRGB*(1.-coverage);
- float alpha=coverage+groundAlpha*(1.-coverage);
- // EDR unavailable: retain material detail and use SDR lamps.
- float peak=max(max(rgb.r,rgb.g),rgb.b);
- rgb*=min(1.,U.options.y/max(peak,.0001));
+ float lightPeak=max(light.r,max(light.g,light.b));
+ float lightAlpha=.18*(1.-exp(-lightPeak*.5));
+ floorRGB+=light*.055*(1.-floorAlpha);floorAlpha+=lightAlpha*(1.-floorAlpha);
+ float edge=min(min(pixel.x,300.-pixel.x),min(pixel.y,380.-pixel.y));
+ float fade=smoothstep(0.,18.,edge);floorRGB*=fade;floorAlpha*=fade;
+ vec3 rgb=color*coverage+floorRGB*(1.-coverage);
+ float alpha=coverage+floorAlpha*(1.-coverage);
+ float peak=max(rgb.r,max(rgb.g,rgb.b));rgb*=min(1.,U.options.y/max(peak,.0001));
  outputColor=vec4(rgb,alpha);
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
-    frag=pathlib.Path(tmp)/'scout.frag';spv=pathlib.Path(tmp)/'scout.spv'
-    frag.write_text(source)
-    subprocess.run(['glslangValidator','-V',str(frag),'-o',str(spv)],check=True)
-    metal=subprocess.check_output(['spirv-cross',str(spv),'--msl'],text=True)
-metal+='''
-vertex float4 scout_vertex(uint id [[vertex_id]]) {
- return float4(id==1?3.:-1.,id==2?3.:-1.,0.,1.);
-}
-'''
-(root/'Resources/scout.metal').write_text('// Derived from the selected Casting Room Scout SDF. Regenerate with scripts/compile-scout.py.\n'+'\n'.join(line.rstrip() for line in metal.splitlines())+'\n')
-print('Wrote native Scout Metal shader')
+ frag=pathlib.Path(tmp)/'scout.frag';spv=pathlib.Path(tmp)/'scout.spv';frag.write_text(header+body+extra+main)
+ subprocess.run(['glslangValidator','-V',str(frag),'-o',str(spv)],check=True)
+ metal=subprocess.check_output(['spirv-cross',str(spv),'--msl'],text=True)
+metal+='\nvertex float4 scout_vertex(uint id [[vertex_id]]) {return float4(id==1?3.:-1.,id==2?3.:-1.,0.,1.);}\n'
+(root/'Resources/scout.metal').write_text('// Authored Scout studio, adapted for native EDR. Regenerate with scripts/compile-scout.py.\n'+'\n'.join(x.rstrip() for x in metal.splitlines())+'\n')
+print('Compiled full Scout studio optics, roof kits and receiver effects')
