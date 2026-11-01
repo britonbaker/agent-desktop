@@ -124,6 +124,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var wanderHome=CGPoint.zero
     private var nextWander=Date.distantFuture
     private var isWandering=false
+    private var controlCenter=150.0
+    private var controlWidth=276.0
     private var scoutTyping=false
     private var scoutNear=false
     private var wanderMenuItem:NSMenuItem?
@@ -196,7 +198,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for (title, action, key) in [("Talk / interrupt", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
-        for (title,action) in [("Preview Scout’s knock greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
+        for (title,action) in [("Preview Scout’s edge greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
             let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
         let wander=NSMenuItem(title:"Let Scout wander",action:#selector(toggleWandering(_:)),keyEquivalent:"")
@@ -298,10 +300,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     @objc private func show() { panel.orderFrontRegardless() }
     @objc private func quit() { NSApplication.shared.terminate(nil) }
-    @objc private func stop() {
+    @objc private func stop() {endConversation()}
+    private func endConversation(preserveGreeting:Bool=false) {
         conversationActive=false
         generation += 1; responseTask?.cancel(); responseTask = nil
-        parkRover()
+        if !preserveGreeting {parkRover()}
         idleTimer?.invalidate(); idleTimer = nil
         audio.end(); scout?.faceRequested=false; update("idle", "Microphone off")
     }
@@ -337,7 +340,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let normalized = TurnPolicy.normalized(text)
         if ["stop", "cancel", "end conversation", "be quiet"].contains(normalized) { stop(); return }
         let keepFace=scout?.faceRequested ?? false, keepConversation=conversationActive
-        stop();scout?.faceRequested=keepFace;conversationActive=keepConversation
+        endConversation(preserveGreeting:true);scout?.faceRequested=keepFace;conversationActive=keepConversation
         let ticket = generation
         update("thinking", text)
         guard SystemLanguageModel.default.isAvailable else { update("error", "Apple’s local model is unavailable. Nothing was sent online."); return }
@@ -444,12 +447,22 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         wanderHome=panel.frame.origin;parkRover()
         if wanderingEnabled {nextWander=Date().addingTimeInterval(2)}
     }
+    private func refreshControlPlacement() {
+        guard companionID == "scout",let area=(panel.screen ?? NSScreen.main)?.visibleFrame else {return}
+        let visible=panel.frame.intersection(area)
+        guard !visible.isNull else {return}
+        let x=visible.midX-panel.frame.minX,width=min(276,visible.width-24)
+        guard abs(x-controlCenter)>0.5 || abs(width-controlWidth)>0.5 else {return}
+        controlCenter=x;controlWidth=width
+        web.evaluateJavaScript("document.documentElement.style.setProperty('--rove-control-x','\(x)px');document.documentElement.style.setProperty('--rove-control-width','\(width)px')",completionHandler:nil)
+    }
     private func ambientTick() {
         guard companionID == "scout",ready,panel.isVisible else {return}
         let mouse=NSEvent.mouseLocation,origin=panel.frame.origin
         let body=NSRect(x:origin.x+85,y:origin.y+135,width:130,height:130)
-        let controls=NSRect(x:origin.x+98,y:origin.y+84,width:104,height:54)
-        let input=NSRect(x:origin.x+10,y:origin.y+84,width:280,height:54)
+        refreshControlPlacement()
+        let controls=NSRect(x:origin.x+controlCenter-52,y:origin.y+84,width:104,height:54)
+        let input=NSRect(x:origin.x+controlCenter-controlWidth/2,y:origin.y+84,width:controlWidth,height:54)
         let near=body.insetBy(dx:-8,dy:-8).contains(mouse) || controls.insetBy(dx:-8,dy:-8).contains(mouse)
         // Transparent padding must not block clicks on the app underneath.
         panel.ignoresMouseEvents = !(body.contains(mouse) || controls.contains(mouse) || (scoutTyping && input.contains(mouse)))
@@ -462,7 +475,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard wanderingEnabled,!busy,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
             if isWandering {parkRover()};return
         }
-        guard driveTimer == nil,Date()>=nextWander else {return}
+        guard driveTimer == nil,greetingTimer == nil,Date()>=nextWander else {return}
         let angle=Double.random(in:0...(2*Double.pi)),radius=Double.random(in:65...145)
         let destination=bounded(CGPoint(x:wanderHome.x+cos(angle)*radius,y:wanderHome.y+sin(angle)*radius*0.65))
         guard hypot(destination.x-panel.frame.minX,destination.y-panel.frame.minY)>30 else {
@@ -476,7 +489,9 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard companionID == "scout",scout != nil,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {return}
         parkRover();scout?.faceRequested=false
         let start=panel.frame.origin
-        let motion=ScoutGreeting(origin:start,destination:bounded(CGPoint(x:start.x,y:start.y-28)),initialHeading:rover.heading)
+        guard let area=(panel.screen ?? NSScreen.main)?.visibleFrame else {return}
+        let scale=Double(scout?.uniforms(width:600,height:760)[2] ?? 55)
+        let motion=ScoutGreeting(origin:start,destination:ScoutGreeting.destination(from:start,in:area,pointsPerUnit:scale),initialHeading:rover.heading,pointsPerUnit:scale)
         let began=Date(),initialDistance=rover.distance
         greetingTimer=Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
             guard let self else {timer.invalidate();return}
@@ -484,10 +499,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let age=Date().timeIntervalSince(began),pose=motion.pose(at:age)
             self.rover.position=pose.position;self.rover.heading=pose.heading
             self.rover.distance=initialDistance+pose.distance
-            self.rover.speed=age>0.22 && age<0.7 ? 60 : 0
-            self.panel.setFrameOrigin(pose.position);self.sendDrivePose()
+            self.rover.speed=pose.moving ? 60 : 0
+            self.panel.setFrameOrigin(pose.position);self.refreshControlPlacement();self.sendDrivePose()
             self.scout?.wheeliePitch=Float(pose.pitch)
-            if age>=ScoutGreeting.duration {
+            if age>=motion.duration {
                 timer.invalidate();self.greetingTimer=nil;self.rover.park();self.sendDrivePose()
                 self.wanderHome=pose.position;self.nextWander=Date().addingTimeInterval(7)
             }
@@ -503,7 +518,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func bounded(_ point: CGPoint) -> CGPoint {
         guard let area = (panel.screen ?? NSScreen.main)?.visibleFrame else { return point }
-        return CGPoint(x:min(area.maxX-panel.frame.width,max(area.minX,point.x)),y:min(area.maxY-panel.frame.height,max(area.minY,point.y)))
+        let padding=companionID == "scout" ? 112.0 : 0
+        return CGPoint(x:min(area.maxX-panel.frame.width+padding,max(area.minX-padding,point.x)),y:min(area.maxY-panel.frame.height,max(area.minY,point.y)))
     }
     private func startDriveTimer() {
         guard driveTimer == nil else { return }

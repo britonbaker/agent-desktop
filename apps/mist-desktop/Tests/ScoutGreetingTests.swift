@@ -1,25 +1,29 @@
 import Foundation
 import CoreGraphics
-
 @main struct ScoutGreetingTests {
     static func main() {
-        let motion=ScoutGreeting(origin:CGPoint(x:100,y:100),destination:CGPoint(x:100,y:72),initialHeading:-3)
-        let start=motion.pose(at:0),peak=motion.pose(at:1.3),end=motion.pose(at:ScoutGreeting.duration)
-        precondition(start.position==CGPoint(x:100,y:100) && start.pitch==0)
-        precondition(end.position==CGPoint(x:100,y:72) && abs(end.pitch)<0.0001)
-        precondition(peak.pitch>0.5 && peak.pitch<0.6)
-        var previous=0.0
-        for frame in 0...168 {
-            let pose=motion.pose(at:Double(frame)/60)
-            precondition(pose.distance>=previous && pose.distance<=28)
-            precondition(pose.position.y>=72 && pose.position.y<=100)
-            previous=pose.distance
+        let area=CGRect(x:0,y:0,width:1512,height:982)
+        for (origin,expected) in [(CGPoint(x:200,y:220),-1.0),(CGPoint(x:1100,y:220),1.0)] {
+            let destination=ScoutGreeting.destination(from:origin,in:area,pointsPerUnit:55)
+            let motion=ScoutGreeting(origin:origin,destination:destination,initialHeading:-3)
+            let contact=0.3+motion.approach
+            let start=motion.pose(at:0),peak=motion.pose(at:contact+0.7),end=motion.pose(at:motion.duration)
+            precondition(start.position==origin && start.pitch==0)
+            precondition(abs(end.pitch)<0.0001 && abs(end.position.x-(destination.x-expected*20))<0.001)
+            precondition(peak.pitch>0.5 && peak.pitch<0.6)
+            precondition(abs(sin(peak.heading)-expected)<0.001)
+            let before=motion.pose(at:contact-0.01)
+            precondition(before.pitch==0)
+            let front=peak.position.x+150+expected*(0.726*55-(1-cos(peak.pitch))*0.862*55)
+            precondition(abs(front-(expected<0 ? area.minX+2 : area.maxX-2))<0.001)
+            for frame in 0...Int(motion.duration*60) {
+                let pose=motion.pose(at:Double(frame)/60)
+                precondition(pose.position.y==origin.y && pose.position.x.isFinite)
+                precondition(pose.position.x+150>20 && pose.position.x+150<area.maxX-20)
+            }
         }
-        // A rear-axle pivot leaves rear-wheel height fixed; front axle rises ~0.44 units.
-        let rearY = -0.472,rearZ = -0.431,frontZ=0.431
-        let rearAfter=rearY+sin(peak.pitch)*(rearZ-rearZ)
-        let frontAfter=rearY+sin(peak.pitch)*(frontZ-rearZ)
-        precondition(rearAfter==rearY && frontAfter-rearAfter>0.4)
-        print("PASS knock greeting: bounded roll, rear-axle lift and complete settle")
+        let offset=CGRect(x:-1920,y:0,width:1920,height:1080)
+        precondition(ScoutGreeting.destination(from:CGPoint(x:-1700,y:200),in:offset,pointsPerUnit:55).x < -1700)
+        print("PASS edge greeting: nearest side, arrival before lift, bezel contact, backdown, safe center and offset display")
     }
 }
