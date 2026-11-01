@@ -1,10 +1,6 @@
 import Foundation
 
 struct ScreenContext {
-    static func isScreenRequest(_ text:String) -> Bool {
-        let words=Set(text.lowercased().split { !$0.isLetter }.map(String.init))
-        return !words.isDisjoint(with:["screen","page","window","looking","this","here","website","front","visible","selected","selection"])
-    }
     static func readableLines(_ excerpt:String) -> [String] {
         let preferred=["heading:","statictext:","text:","paragraph:","webarea:","link:"]
         let lines=excerpt.components(separatedBy:"\n")
@@ -15,6 +11,11 @@ struct ScreenContext {
             return value.count>=12 || line.hasPrefix("heading:") || line.hasPrefix("webarea:")
         }
         return content
+    }
+    static func semanticLines(_ excerpt:String) -> [String] {
+        let controls=["button:","textfield:","combobox:","checkbox:","menuitem:","radiobutton:","slider:"]
+        let namedControls=excerpt.components(separatedBy:"\n").filter {line in controls.contains(where:line.lowercased().hasPrefix)}
+        return readableLines(excerpt)+namedControls
     }
     static func spokenReadout(_ excerpt:String, selected:[Int]) -> String {
         let lines=readableLines(excerpt)

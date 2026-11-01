@@ -2,9 +2,6 @@ import Foundation
 @main struct ScreenContextTests {
     static func main() throws {
         func summarize(_ object: [String:Any]) throws -> String { ScreenContext.summarize(try JSONSerialization.data(withJSONObject:object)) }
-        precondition(ScreenContext.isScreenRequest("What's on my screen?"))
-        precondition(ScreenContext.isScreenRequest("Can you explain this?"))
-        precondition(!ScreenContext.isScreenRequest("Hello, tell me about yourself"))
         let fixture: [String:Any] = ["ok":true,"data":["complete":false,"window":["title":"Article"],"tree":["role":"window","children":[["role":"text","name":"A useful page paragraph"],["role":"secureTextField","value":"private-password"],["role":"text","name":"A useful page paragraph"]]]]]
         let result = try summarize(fixture)
         precondition(result.contains("A useful page paragraph") && result.contains("Partial"))
@@ -17,6 +14,7 @@ import Foundation
         precondition(grounded.contains("Actual page fact") && !grounded.contains("999"))
         precondition(grounded.components(separatedBy:"Actual page fact").count==2)
         precondition(ScreenContext.spokenReadout("webarea: Site\nstatictext: Loading older messages…",selected:[]).contains("not exposing enough"))
+        precondition(ScreenContext.semanticLines("button: Send\ntextfield: Search").contains("button: Send"))
         let denied = try summarize(["ok":false,"error":["code":"PERM_DENIED","message":"Accessibility required"]])
         precondition(denied.contains("PERM_DENIED") && !denied.contains("useful page"))
         precondition(ScreenContext.summarize(Data("invalid".utf8)).contains("did not return"))

@@ -1,10 +1,10 @@
 # Rove voice prototype
 
-A floating Rove character connected to local Apple speech recognition, Apple's on-device Foundation Model, and Gradium Phonon 0.4.0 speech. Desktop actions are disabled. This app is separate from the installed agent-desktop CLI and the earlier Aural Assistant app.
+A floating Rove character connected to local Apple speech recognition, Apple's on-device Foundation Model, and Gradium Phonon 0.4.0 speech. Rove can explain accessible window content, list running apps and switch to a requested running app. Other desktop actions are disabled. This app is separate from the installed agent-desktop CLI and the earlier Aural Assistant app.
 
 ## Current interaction
 
-Press the character's Talk button to listen. The microphone closes after a completed utterance. Rove generates a short local reply and streams Gradium audio. Press Talk while it is thinking or speaking to cancel and listen again. Escape and the menu's Stop action stop listening and playback. Listening times out after 35 seconds. The character supports dragging and inertial movement.
+Press the character's Talk button to start a conversation. The microphone closes after each completed utterance while Rove reasons and streams Gradium audio. After playback and a 350 ms tail, listening resumes for a follow-up question. Press Talk while it is thinking or speaking to cancel and listen again. Escape, “end conversation” and the menu's Stop action end the conversation and stop listening and playback. Listening times out after 35 seconds. The character supports dragging and inertial movement.
 
 Double-tap activation is wired to the same interaction but stays disabled without a measured calibration profile. The profile is loaded from `~/Library/Application Support/Rove/tap-profile.json`; it must contain a finite `threshold` between 0.001 and 0.2 and `keyboardVerified: true`. Do not manufacture a profile to bypass calibration.
 
@@ -41,7 +41,7 @@ The character renderer and local speech components were copied from the user's p
 
 The motion report layout follows the public research at https://github.com/olvvier/apple-silicon-accelerometer. Sensor properties are restored on normal shutdown; crash and sleep/wake recovery still need validation. The prototype uses a default of zero when a driver property was absent before activation.
 
-The local model receives a bounded accessibility-text excerpt from the last external app, through a bundled agent-desktop snapshot command. It has no action tools. Screen text is treated as untrusted data. Access failures are handled with a fixed message rather than asking the model to invent permission instructions. The excerpt may be incomplete and does not describe images.
+The local model receives a bounded accessibility-text excerpt from the last external app, through a bundled agent-desktop snapshot command. Its only enabled mutation is switching to a running application requested by the user. Screen text is treated as untrusted data. Access failures are handled with a fixed message rather than asking the model to invent permission instructions. The excerpt may be incomplete and does not describe images.
 
 The Companion menu offers Pixel Face, the recovered white handheld with sticky hand, and Orbloom; selection persists. The handheld reuses the original Metal shader and its four-pass rendering. Its expressions reflect conversation state; its original interaction physics have not all been ported. Gradium starts loading at app launch; the reply text appears at first audio scheduling rather than before synthesis. Audible latency still needs user validation.
 
@@ -85,7 +85,26 @@ Run `build/Rove.app/Contents/MacOS/Rove --scout-self-test` to compile and render
 
 Scout's recessed roof display uses amber pixel lettering like his face. It shows READY, LISTEN, THINK, TALK or ERROR from the native conversation state. Routine thought bubbles and the old browser microphone diagnostics are hidden. Errors that need attention can still show above him. The existing Talk and type controls remain available, and the character button exposes its state to accessibility tools. **Show last reply** (Command-R) opens the full spoken answer in an accessible native dialog.
 
-**Explain front window** (Command-E) reads the last external app through the same local conversation pipeline. The reader prioritizes embedded web pages and main content before browser controls and host sidebars, while retaining the bounded excerpt and protected-field exclusions. Ordinary greetings no longer require a successful screen read. Screenshot vision and desktop action tools remain disabled; image-only content is still unavailable.
+**Explain front window** (Command-E) reads the last external app through the same local conversation pipeline. The reader prioritizes embedded web pages and main content before browser controls and host sidebars, while retaining the bounded excerpt and protected-field exclusions. Ordinary greetings no longer require a successful screen read. Screenshot vision remains unavailable; image-only content is not interpreted. App switching is enabled through a separate action allowlist.
 
 
-Screen readouts currently use the local model to choose up to three source lines, then speak those exact lines. Invalid indexes and duplicates are discarded; failed selection falls back to the first readable lines. This avoids the unsupported page capabilities observed in free-form local summaries. It is a grounded readout, not a verified visual interpretation or an open-ended explanation. Ordinary conversation remains free-form and local.
+Screen explanations now synthesize a short conversational answer from accessible page content. The local model supplies exact evidence quotations, which must occur in the excerpt. A second local generation checks whether every factual claim is supported. If either check fails, Rove says it cannot confidently explain the whole page and falls back to source text. These checks reduce unsupported claims; they do not guarantee correctness. Rove cannot interpret image-only content or interfaces without useful accessibility text.
+
+## Natural desktop requests
+
+`DesktopAgent.swift` classifies the current spoken or typed request using Apple's local model and a catalog of running apps. Examples include “bring Safari up,” “take me to Finder,” “what am I looking at here?” and “which applications are open?” Ordinary conversation uses a separate conversational response. Previous foreground-app context and the most recent verified switch support “go back” when the target can be resolved.
+
+Only a uniquely resolved running-app ID can reach the switch executor. The chosen app must also be named in the trusted user request, match a supported name alias, or match the recorded previous app for a back request. Screen content never enters action routing. App activation uses the installed app URL from the running process with Launch Services' existing-instance configuration. It does not pass user text as a path, shell command or launch argument. Rove confirms the foreground process before announcing success; uncertain results are reported without an automatic repeat. Cancellation is checked before mutation and while waiting for verification.
+
+The app catalog and switching use AppKit because the installed agent-desktop `list-apps` returned `application_inventory_unstable` during development. Window content still comes from the bundled agent-desktop accessibility reader. No changes were made to the Rust core. Clicking, typing, closing apps, sending, deleting, purchases and settings changes have no executor in Rove. They remain unavailable rather than being offered without a confirmation policy.
+
+`--desktop-self-test` exercises the real local model on natural routing, negated requests, quoted screen instructions and an unsupported deletion request, previous-app resolution, compound switch-and-explain requests, evidence checks and a screen-summary fixture. It does not switch apps, open the microphone or play audio. Run it under a network-denying sandbox to verify this path has no cloud dependency:
+
+```sh
+sandbox-exec -p '(version 1)(allow default)(deny network*)' build/Rove.app/Contents/MacOS/Rove --desktop-self-test
+```
+
+Follow-up listening and activation need separate live checks; the silent self-test does not establish physical microphone behavior or a successful app switch. A live UI check observed listening resume after a spoken reply from a typed turn in an active conversation, and Escape returned the app to idle. Spoken interruption during playback still requires tap or Talk because the microphone remains closed during speech.
+
+
+Live development checks brought Finder forward from a natural typed request and obtained a conversational explanation of Finder's accessible contents. Foreground acknowledgment was verified in the runtime before speech. Physical speech-recognition accuracy still requires user validation; typed requests exercise the same routing and action layer without establishing recognition accuracy.

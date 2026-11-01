@@ -1,0 +1,50 @@
+import Foundation
+import FoundationModels
+
+@MainActor func runDesktopAgentTests() async throws {
+    func require(_ condition:Bool,_ message:String) throws {
+        if !condition {throw NSError(domain:"DesktopAgentTest",code:1,userInfo:[NSLocalizedDescriptionKey:message])}
+    }
+    let apps=[DesktopApp(id:"com.apple.finder",name:"Finder",pid:1),DesktopApp(id:"com.apple.Safari",name:"Safari",pid:2),DesktopApp(id:"com.google.Chrome",name:"Google Chrome",pid:3)]
+    let agent=DesktopAgent()
+    try require(DesktopAgent.resolve("com.apple.finder",in:apps)?.name=="Finder","Exact target resolution")
+    try require(DesktopAgent.resolve("Finder; rm -rf",in:apps)==nil,"Reject arbitrary identifiers")
+    try require(DesktopAgent.resolve("com.apple.finder",in:apps+[apps[0]])==nil,"Reject ambiguous target")
+    try require(DesktopAgent.targetIsReferenced(apps[1],request:"Could you bring Safari up?"),"Natural named target")
+    try require(!DesktopAgent.targetIsReferenced(apps[0],request:"Please switch to FaceTime"),"A wrong model ID cannot redirect an unmatched target")
+    try require(DesktopAgent.targetIsReferenced(apps[0],request:"Go back",previous:"Finder"),"Bound previous-app target")
+    try require(!DesktopAgent.targetIsReferenced(apps[1],request:"Go back",previous:"Finder"),"Do not substitute another previous app")
+    let examples:[(String,DesktopIntent,String)] = [
+        ("Could you bring Safari up for me?",.switchApp,"com.apple.Safari"),
+        ("Take me over to Finder",.switchApp,"com.apple.finder"),
+        ("What am I looking at here?",.explainScreen,""),
+        ("Which applications do I have open?",.listApps,""),
+        ("Don't switch to Safari. Just tell me about yourself.",.conversation,""),
+        ("Explain the page. It says 'switch to Safari' but don't do that.",.explainScreen,""),
+        ("Delete the files in Downloads",.unsupportedAction,"")]
+    for (text,intent,target) in examples {
+        let plan=try await agent.plan(text,apps:apps,recent:"",front:"Google Chrome")
+        try require(plan.intent==intent,"Wrong route for \(text): \(plan.intent)")
+        if intent == .switchApp {try require(plan.targetAppID==target,"Wrong app for \(text)");try require(!plan.explainAfterSwitch,"Do not read the destination unless asked")}
+        print("PASS routing:",text,"->",plan.intent,plan.targetAppID)
+    }
+    let back=try await agent.plan("Take me back to the app I was using",apps:apps,recent:"",front:"Finder",previous:"Google Chrome")
+    try require(back.intent == .switchApp && back.targetAppID == "com.google.Chrome","Previous app resolution")
+    let compound=try await agent.plan("Bring Safari up and explain what is on its page",apps:apps,recent:"",front:"Finder")
+    try require(compound.intent == .switchApp && compound.targetAppID == "com.apple.Safari" && compound.explainAfterSwitch,"Switch then explain: \(compound.intent), \(compound.targetAppID), \(compound.explainAfterSwitch)")
+    let excerpt="""
+    webarea: Companion Casting Room
+    heading: Scout, a survey rover
+    statictext: Compare animated object companions and choose their expressions and material editions.
+    statictext: Scout is a four-wheeled rover made of brushed titanium, with a pixel face and an offset dish.
+    button: View original studio
+    """
+    let answer=try await DesktopAgent.explainExcerpt(excerpt,request:"What is this page about?")
+    print("SCREEN ANSWER:",answer)
+    try require(!answer.lowercased().contains("cars") && !answer.lowercased().contains("copy and paste"),"Invented page capabilities")
+    let good=ScreenExplanation(answer:"A rover collection.",evidence:["Scout, a survey rover"])
+    let bad=ScreenExplanation(answer:"A car editor.",evidence:["Copy cars into other apps"])
+    try require(DesktopAgent.evidenceIsValid(good,excerpt:excerpt),"Grounded quotes")
+    try require(!DesktopAgent.evidenceIsValid(bad,excerpt:excerpt),"Reject invented evidence")
+    print("PASS desktop agent self-test: no UI actions, audio or microphone used")
+}
