@@ -1,16 +1,63 @@
 // Derived from the selected Casting Room Scout SDF. Regenerate with scripts/compile-scout.py.
 #pragma clang diagnostic ignored "-Wmissing-prototypes"
+#pragma clang diagnostic ignored "-Wmissing-braces"
 
 #include <metal_stdlib>
 #include <simd/simd.h>
 
 using namespace metal;
 
+template<typename T, size_t Num>
+struct spvUnsafeArray
+{
+    T elements[Num ? Num : 1];
+
+    thread T& operator [] (size_t pos) thread
+    {
+        return elements[pos];
+    }
+    constexpr const thread T& operator [] (size_t pos) const thread
+    {
+        return elements[pos];
+    }
+
+    device T& operator [] (size_t pos) device
+    {
+        return elements[pos];
+    }
+    constexpr const device T& operator [] (size_t pos) const device
+    {
+        return elements[pos];
+    }
+
+    constexpr const constant T& operator [] (size_t pos) const constant
+    {
+        return elements[pos];
+    }
+
+    threadgroup T& operator [] (size_t pos) threadgroup
+    {
+        return elements[pos];
+    }
+    constexpr const threadgroup T& operator [] (size_t pos) const threadgroup
+    {
+        return elements[pos];
+    }
+};
+
 // Implementation of the GLSL mod() function, which is slightly different than Metal fmod()
 template<typename Tx, typename Ty>
 inline Tx mod(Tx x, Ty y)
 {
     return x - y * floor(x / y);
+}
+
+// Implementation of signed integer mod accurate to SPIR-V specification
+template<typename Tx, typename Ty>
+inline Tx spvSMod(Tx x, Ty y)
+{
+    Tx remainder = x - y * (x / y);
+    return select(Tx(remainder + y), remainder, remainder == 0 || (x >= 0) == (y >= 0));
 }
 
 struct NativeUniforms
@@ -20,6 +67,12 @@ struct NativeUniforms
     float4 pose;
     float4 options;
 };
+
+constant spvUnsafeArray<int, 5> _284 = spvUnsafeArray<int, 5>({ 82, 69, 65, 68, 89 });
+constant spvUnsafeArray<int, 6> _307 = spvUnsafeArray<int, 6>({ 76, 73, 83, 84, 69, 78 });
+constant spvUnsafeArray<int, 5> _319 = spvUnsafeArray<int, 5>({ 84, 72, 73, 78, 75 });
+constant spvUnsafeArray<int, 4> _341 = spvUnsafeArray<int, 4>({ 84, 65, 76, 75 });
+constant spvUnsafeArray<int, 5> _355 = spvUnsafeArray<int, 5>({ 69, 82, 82, 79, 82 });
 
 struct main0_out
 {
@@ -45,11 +98,11 @@ void scCamera(thread const float2& uv, thread const float2& orbit, thread float3
     float3 ground = float3(uv.x, -0.767000019550323486328125, uv.y);
     float3 eye = U.eye.xyz;
     float3 param = eye - float3(0.0, U.pose.w * 1.0499999523162841796875, 0.0);
-    float3 _3014 = worldToScout(param, U);
-    ro = _3014;
+    float3 _3363 = worldToScout(param, U);
+    ro = _3363;
     float3 param_1 = fast::normalize(ground - eye);
-    float3 _3020 = worldToScout(param_1, U);
-    rd = _3020;
+    float3 _3369 = worldToScout(param_1, U);
+    rd = _3369;
 }
 
 static inline __attribute__((always_inline))
@@ -83,16 +136,16 @@ float scSection(thread const float& a, thread const float& b, thread const float
 static inline __attribute__((always_inline))
 float2 scAdd(thread const float2& a, thread const float& b, thread const float& id)
 {
-    float2 _930;
+    float2 _1281;
     if (a.x < b)
     {
-        _930 = a;
+        _1281 = a;
     }
     else
     {
-        _930 = float2(b, id);
+        _1281 = float2(b, id);
     }
-    return _930;
+    return _1281;
 }
 
 static inline __attribute__((always_inline))
@@ -151,17 +204,17 @@ float2 scScene(thread const float3& p, constant NativeUniforms& U)
         obj = scAdd(param_24, param_25, param_26);
     }
     float3 w = float3(ax - 0.653999984264373779296875, p.y + 0.47200000286102294921875, abs(p.z) - 0.4309999942779541015625);
-    bool _1115 = w.y < 0.38999998569488525390625;
-    bool _1122;
-    if (_1115)
+    bool _1466 = w.y < 0.38999998569488525390625;
+    bool _1473;
+    if (_1466)
     {
-        _1122 = w.y > (-0.37999999523162841796875);
+        _1473 = w.y > (-0.37999999523162841796875);
     }
     else
     {
-        _1122 = _1115;
+        _1473 = _1466;
     }
-    if (_1122 && (ax > 0.3499999940395355224609375))
+    if (_1473 && (ax > 0.3499999940395355224609375))
     {
         float r = length(w.yz);
         float angle = precise::atan2(w.y, w.z) + (U.pose.y / (U.viewport.z * 0.2949999868869781494140625));
@@ -247,17 +300,17 @@ float2 scScene(thread const float3& p, constant NativeUniforms& U)
             obj = scAdd(param_80, param_81, param_82);
         }
     }
-    bool _1400 = p.y > 0.3499999940395355224609375;
-    bool _1407;
-    if (_1400)
+    bool _1744 = p.y > 0.3499999940395355224609375;
+    bool _1751;
+    if (_1744)
     {
-        _1407 = p.x < (-0.119999997317790985107421875);
+        _1751 = p.x < (-0.119999997317790985107421875);
     }
     else
     {
-        _1407 = _1400;
+        _1751 = _1744;
     }
-    if (_1407)
+    if (_1751)
     {
         float3 a = float3(-0.4050000011920928955078125, 0.4550000131130218505859375, -0.15600000321865081787109375);
         float3 b = float3(-0.4050000011920928955078125, 0.681999981403350830078125, -0.17700000107288360595703125);
@@ -324,6 +377,13 @@ float2 scScene(thread const float3& p, constant NativeUniforms& U)
     float param_125 = scBox(param_121, param_122, param_123);
     float param_126 = 12.0;
     obj = scAdd(param_124, param_125, param_126);
+    float3 param_127 = p - float3(0.0, 0.4839999973773956298828125, 0.20000000298023223876953125);
+    float3 param_128 = float3(0.430000007152557373046875, 0.02199999988079071044921875, 0.1599999964237213134765625);
+    float param_129 = 0.02500000037252902984619140625;
+    float2 param_130 = obj;
+    float param_131 = scBox(param_127, param_128, param_129);
+    float param_132 = 13.0;
+    obj = scAdd(param_130, param_131, param_132);
     return obj;
 }
 
@@ -336,6 +396,193 @@ float3 scNormal(thread const float3& p, constant NativeUniforms& U)
     float3 param_2 = p + e.yxy;
     float3 param_3 = p + e.xxx;
     return fast::normalize((((e.xyy * scScene(param, U).x) + (e.yyx * scScene(param_1, U).x)) + (e.yxy * scScene(param_2, U).x)) + (e.xxx * scScene(param_3, U).x));
+}
+
+static inline __attribute__((always_inline))
+int roofLetter(thread const int& index, constant NativeUniforms& U)
+{
+    if (U.pose.z < 0.5)
+    {
+        int _288;
+        if (index < 5)
+        {
+            _288 = _284[index];
+        }
+        else
+        {
+            _288 = 0;
+        }
+        return _288;
+    }
+    if (U.pose.z < 1.5)
+    {
+        return _307[index];
+    }
+    if (U.pose.z < 2.5)
+    {
+        int _322;
+        if (index < 5)
+        {
+            _322 = _319[index];
+        }
+        else
+        {
+            _322 = 0;
+        }
+        return _322;
+    }
+    if (U.pose.z < 3.5)
+    {
+        int _345;
+        if (index < 4)
+        {
+            _345 = _341[index];
+        }
+        else
+        {
+            _345 = 0;
+        }
+        return _345;
+    }
+    int _358;
+    if (index < 5)
+    {
+        _358 = _355[index];
+    }
+    else
+    {
+        _358 = 0;
+    }
+    return _358;
+}
+
+static inline __attribute__((always_inline))
+int roofGlyph(thread const int& code)
+{
+    if (code == 65)
+    {
+        return 11245;
+    }
+    if (code == 68)
+    {
+        return 27502;
+    }
+    if (code == 69)
+    {
+        return 31143;
+    }
+    if (code == 72)
+    {
+        return 23533;
+    }
+    if (code == 73)
+    {
+        return 29847;
+    }
+    if (code == 75)
+    {
+        return 23469;
+    }
+    if (code == 76)
+    {
+        return 18727;
+    }
+    if (code == 78)
+    {
+        return 24573;
+    }
+    if (code == 79)
+    {
+        return 31599;
+    }
+    if (code == 82)
+    {
+        return 27565;
+    }
+    if (code == 83)
+    {
+        return 31183;
+    }
+    if (code == 84)
+    {
+        return 29842;
+    }
+    if (code == 89)
+    {
+        return 23186;
+    }
+    return 0;
+}
+
+static inline __attribute__((always_inline))
+float3 scRoof(thread const float3& p, constant NativeUniforms& U)
+{
+    float2 surface = ((p.xz - float2(0.0, 0.20000000298023223876953125)) / float2(0.800000011920928955078125, 0.2599999904632568359375)) + float2(0.5);
+    float2 pixel = float2(surface.x * 26.0, (1.0 - surface.y) * 9.0);
+    int2 cell = int2(floor(pixel));
+    int _404;
+    if (U.pose.z < 0.5)
+    {
+        _404 = 5;
+    }
+    else
+    {
+        int _411;
+        if (U.pose.z < 1.5)
+        {
+            _411 = 6;
+        }
+        else
+        {
+            int _419;
+            if (U.pose.z < 2.5)
+            {
+                _419 = 5;
+            }
+            else
+            {
+                _419 = (U.pose.z < 3.5) ? 4 : 5;
+            }
+            _411 = _419;
+        }
+        _404 = _411;
+    }
+    int count = _404;
+    int x = cell.x - ((26 - ((count * 4) - 1)) / 2);
+    int y = cell.y - 2;
+    float dotInk = 0.0;
+    bool _447 = x >= 0;
+    bool _454;
+    if (_447)
+    {
+        _454 = x < (count * 4);
+    }
+    else
+    {
+        _454 = _447;
+    }
+    bool _460 = (_454 && (y >= 0)) && (y < 5);
+    bool _467;
+    if (_460)
+    {
+        _467 = spvSMod(x, 4) < 3;
+    }
+    else
+    {
+        _467 = _460;
+    }
+    if (_467)
+    {
+        int bit = 14 - ((y * 3) + spvSMod(x, 4));
+        int param = x / 4;
+        int param_1 = roofLetter(param, U);
+        dotInk = float((roofGlyph(param_1) >> bit) & 1);
+    }
+    float2 dotUV = fract(pixel) - float2(0.5);
+    float aperture = 1.0 - smoothstep(0.3400000035762786865234375, 0.4799999892711639404296875, fast::max(abs(dotUV.x), abs(dotUV.y)));
+    float3 glass = float3(0.01200000010430812835693359375, 0.02099999971687793731689453125, 0.02300000004470348358154296875);
+    float3 phosphor = float3(0.88999998569488525390625, 0.625999987125396728515625, 0.24500000476837158203125);
+    return glass + (((phosphor * dotInk) * aperture) * 1.35000002384185791015625);
 }
 
 static inline __attribute__((always_inline))
@@ -389,16 +636,16 @@ float baseFaceInk(thread const float2& cell, thread const float& mode, thread co
     bool speak = mode == 3.0;
     bool sleep = mode == 4.0;
     float2 p = floor(cell) - float2(31.0, 24.0);
-    float _350;
+    float _709;
     if (sleep)
     {
-        _350 = 0.0;
+        _709 = 0.0;
     }
     else
     {
-        _350 = smoothstep(0.0199999995529651641845703125, 0.1599999964237213134765625, abs(mod(t + 0.85000002384185791015625, 5.349999904632568359375) - 0.1599999964237213134765625));
+        _709 = smoothstep(0.0199999995529651641845703125, 0.1599999964237213134765625, abs(mod(t + 0.85000002384185791015625, 5.349999904632568359375) - 0.1599999964237213134765625));
     }
-    float blink = _350;
+    float blink = _709;
     float signX = (p.x < 0.0) ? (-1.0) : 1.0;
     float2 gaze = floor((look * 2.0) + float2(0.5));
     gaze.x += floor((1.10000002384185791015625 * sin(0.800000011920928955078125 * t)) + 0.5);
@@ -407,16 +654,16 @@ float baseFaceInk(thread const float2& cell, thread const float& mode, thread co
         gaze = float2(floor((3.0 * sin(t * 1.37999999523162841796875)) + 0.5), 1.0);
     }
     float2 eye = p - float2(10.0 * signX, 3.0);
-    float _407;
+    float _765;
     if (listen)
     {
-        _407 = (signX > 0.0) ? 7.0 : 5.0;
+        _765 = (signX > 0.0) ? 7.0 : 5.0;
     }
     else
     {
-        _407 = 6.0;
+        _765 = 6.0;
     }
-    float radius = _407;
+    float radius = _765;
     if (think && (signX < 0.0))
     {
         eye.y -= 2.0;
@@ -426,8 +673,8 @@ float baseFaceInk(thread const float2& cell, thread const float& mode, thread co
     float param_2 = blink;
     float2 param_3 = gaze;
     bool param_4 = think;
-    float _445 = scFinder(param, param_1, param_2, param_3, param_4);
-    float v = _445;
+    float _803 = scFinder(param, param_1, param_2, param_3, param_4);
+    float v = _803;
     if (!sleep)
     {
         float2 param_5 = p - float2(0.0, 5.0);
@@ -670,35 +917,35 @@ float3 scHousing(thread const float3& p, thread const float3& n, thread const fl
             float param_5 = panel;
             float param_6 = 0.00200000009499490261077880859375;
             metal *= (1.0 - (0.4199999868869781494140625 * scDash(param_5, param_6)));
-            bool _1971 = s.x < 0.18899999558925628662109375;
-            bool _1978;
-            if (_1971)
+            bool _2327 = s.x < 0.18899999558925628662109375;
+            bool _2334;
+            if (_2327)
             {
-                _1978 = s.x > (-0.2899999916553497314453125);
+                _2334 = s.x > (-0.2899999916553497314453125);
             }
             else
             {
-                _1978 = _1971;
+                _2334 = _2327;
             }
-            bool _1985;
-            if (_1978)
+            bool _2341;
+            if (_2334)
             {
-                _1985 = s.y > (-0.0030000000260770320892333984375);
+                _2341 = s.y > (-0.0030000000260770320892333984375);
             }
             else
             {
-                _1985 = _1978;
+                _2341 = _2334;
             }
-            bool _1992;
-            if (_1985)
+            bool _2348;
+            if (_2341)
             {
-                _1992 = s.y < 0.20999999344348907470703125;
+                _2348 = s.y < 0.20999999344348907470703125;
             }
             else
             {
-                _1992 = _1985;
+                _2348 = _2341;
             }
-            if (_1992)
+            if (_2348)
             {
                 float k = floor(((s.x + 0.2290000021457672119140625) / 0.076999999582767486572265625) + 0.5);
                 float2 l = s - float2((-0.2290000021457672119140625) + (k * 0.076999999582767486572265625), 0.092000000178813934326171875);
@@ -728,17 +975,17 @@ float3 scHousing(thread const float3& p, thread const float3& n, thread const fl
             float param_17 = panel_1;
             float param_18 = 0.0030000000260770320892333984375;
             metal *= (1.0 - (0.4600000083446502685546875 * scDash(param_17, param_18)));
-            bool _2113 = abs(s_1.x) < 0.263999998569488525390625;
-            bool _2121;
-            if (_2113)
+            bool _2468 = abs(s_1.x) < 0.263999998569488525390625;
+            bool _2476;
+            if (_2468)
             {
-                _2121 = abs(s_1.y) < 0.16300000250339508056640625;
+                _2476 = abs(s_1.y) < 0.16300000250339508056640625;
             }
             else
             {
-                _2121 = _2113;
+                _2476 = _2468;
             }
-            if (_2121)
+            if (_2476)
             {
                 float k_1 = floor(((s_1.y + 0.12800000607967376708984375) / 0.05099999904632568359375) + 0.5);
                 float2 param_19 = s_1 - float2(0.0, (-0.12800000607967376708984375) + (0.05099999904632568359375 * k_1));
@@ -766,17 +1013,17 @@ float3 scHousing(thread const float3& p, thread const float3& n, thread const fl
             float param_29 = door;
             float param_30 = 0.0030000000260770320892333984375;
             metal *= (1.0 - (0.5099999904632568359375 * scDash(param_29, param_30)));
-            bool _2232 = abs(s_2.x) < 0.2989999949932098388671875;
-            bool _2240;
-            if (_2232)
+            bool _2587 = abs(s_2.x) < 0.2989999949932098388671875;
+            bool _2595;
+            if (_2587)
             {
-                _2240 = abs(s_2.y) < 0.13099999725818634033203125;
+                _2595 = abs(s_2.y) < 0.13099999725818634033203125;
             }
             else
             {
-                _2240 = _2232;
+                _2595 = _2587;
             }
-            if (_2240)
+            if (_2595)
             {
                 float2 uv = s_2 - float2(0.0, 0.01600000075995922088623046875);
                 float line_1 = floor(((uv.y + 0.083999998867511749267578125) / 0.0430000014603137969970703125) + 0.5);
@@ -848,17 +1095,17 @@ float3 scHousing(thread const float3& p, thread const float3& n, thread const fl
     }
     if (id < 5.5)
     {
-        bool _2514 = abs(p.x) > 0.709999978542327880859375;
-        bool _2521;
-        if (_2514)
+        bool _2867 = abs(p.x) > 0.709999978542327880859375;
+        bool _2874;
+        if (_2867)
         {
-            _2521 = p.y < (-0.180000007152557373046875);
+            _2874 = p.y < (-0.180000007152557373046875);
         }
         else
         {
-            _2521 = _2514;
+            _2874 = _2867;
         }
-        if (_2521)
+        if (_2874)
         {
             float2 w_1 = float2(p.y + 0.47200000286102294921875, abs(p.z) - 0.4309999942779541015625);
             float r_3 = length(w_1);
@@ -917,8 +1164,8 @@ float3 pcHousing(thread const float2& uv, thread const float& mode, thread const
     if (disc < 0.0)
     {
         float3 param_4 = col;
-        float3 _3136 = objectStudioMiss(param_4, objectCoverage);
-        return _3136;
+        float3 _3485 = objectStudioMiss(param_4, objectCoverage);
+        return _3485;
     }
     float d = (-c) - sqrt(disc);
     float farD = (-c) + sqrt(disc);
@@ -933,60 +1180,68 @@ float3 pcHousing(thread const float2& uv, thread const float& mode, thread const
         }
         d += fast::max(0.0004900000058114528656005859375, h.x * 0.699999988079071044921875);
     }
-    bool _3190 = d > farD;
-    bool _3198;
-    if (!_3190)
+    bool _3538 = d > farD;
+    bool _3546;
+    if (!_3538)
     {
-        _3198 = h.x > 0.00209999992512166500091552734375;
+        _3546 = h.x > 0.00209999992512166500091552734375;
     }
     else
     {
-        _3198 = _3190;
+        _3546 = _3538;
     }
-    if (_3198)
+    if (_3546)
     {
         float3 param_6 = col;
-        float3 _3203 = objectStudioMiss(param_6, objectCoverage);
-        return _3203;
+        float3 _3551 = objectStudioMiss(param_6, objectCoverage);
+        return _3551;
     }
     float3 p = ro + (rd * d);
     float3 param_7 = p;
     float3 n = scNormal(param_7, U);
     float3 v = -rd;
     float3 linear;
-    if (h.y == 12.0)
+    if (h.y == 13.0)
     {
-        linear = float3(4.0, 3.7000000476837158203125, 2.7999999523162841796875);
+        float3 param_8 = p;
+        linear = scRoof(param_8, U);
     }
     else
     {
-        bool _3230 = h.y == 3.0;
-        bool _3236;
-        if (_3230)
+        if (h.y == 12.0)
         {
-            _3236 = n.z > 0.939999997615814208984375;
+            linear = float3(4.0, 3.7000000476837158203125, 2.7999999523162841796875);
         }
         else
         {
-            _3236 = _3230;
-        }
-        if (_3236)
-        {
-            pipGlassHit = true;
-            float3 param_8 = p + (v * ((0.515999972820281982421875 - p.z) / v.z));
-            float3 param_9 = v;
-            float param_10 = mode;
-            float param_11 = age;
-            float2 param_12 = look;
-            linear = scLCD(param_8, param_9, param_10, param_11, param_12, pcExpression, U);
-        }
-        else
-        {
-            float3 param_13 = p;
-            float3 param_14 = n;
-            float3 param_15 = v;
-            float param_16 = h.y;
-            linear = scHousing(param_13, param_14, param_15, param_16, U);
+            bool _3587 = h.y == 3.0;
+            bool _3593;
+            if (_3587)
+            {
+                _3593 = n.z > 0.939999997615814208984375;
+            }
+            else
+            {
+                _3593 = _3587;
+            }
+            if (_3593)
+            {
+                pipGlassHit = true;
+                float3 param_9 = p + (v * ((0.515999972820281982421875 - p.z) / v.z));
+                float3 param_10 = v;
+                float param_11 = mode;
+                float param_12 = age;
+                float2 param_13 = look;
+                linear = scLCD(param_9, param_10, param_11, param_12, param_13, pcExpression, U);
+            }
+            else
+            {
+                float3 param_14 = p;
+                float3 param_15 = n;
+                float3 param_16 = v;
+                float param_17 = h.y;
+                linear = scHousing(param_14, param_15, param_16, param_17, U);
+            }
         }
     }
     return fast::max(linear, float3(0.0));
@@ -1002,8 +1257,8 @@ float3 renderBot(thread const float2& uv, thread const float& mode, thread const
     float param_3 = t;
     float2 param_4 = orbit;
     float2 param_5 = look;
-    float3 _3293 = pcHousing(param, param_1, param_2, param_3, param_4, param_5, pcExpression, objectCoverage, pipGlassHit, U);
-    return _3293;
+    float3 _3650 = pcHousing(param, param_1, param_2, param_3, param_4, param_5, pcExpression, objectCoverage, pipGlassHit, U);
+    return _3650;
 }
 
 fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_FragCoord [[position]])
@@ -1020,8 +1275,8 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
     float param_3 = U.eye.w;
     float2 param_4 = float2(0.0);
     float2 param_5 = float2(0.0);
-    float3 _3338 = renderBot(param, param_1, param_2, param_3, param_4, param_5, pcExpression, objectCoverage, pipGlassHit, U);
-    float3 color = _3338;
+    float3 _3694 = renderBot(param, param_1, param_2, param_3, param_4, param_5, pcExpression, objectCoverage, pipGlassHit, U);
+    float3 color = _3694;
     float coverage = objectCoverage;
     float c = cos(U.pose.x);
     float s = sin(U.pose.x);

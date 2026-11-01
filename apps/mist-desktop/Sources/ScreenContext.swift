@@ -1,6 +1,33 @@
 import Foundation
 
 struct ScreenContext {
+    static func isScreenRequest(_ text:String) -> Bool {
+        let words=Set(text.lowercased().split { !$0.isLetter }.map(String.init))
+        return !words.isDisjoint(with:["screen","page","window","looking","this","here","website","front","visible","selected","selection"])
+    }
+    static func readableLines(_ excerpt:String) -> [String] {
+        let preferred=["heading:","statictext:","text:","paragraph:","webarea:","link:"]
+        let lines=excerpt.components(separatedBy:"\n")
+        let content=lines.filter { line in
+            guard preferred.contains(where:{line.lowercased().hasPrefix($0)}),let colon=line.firstIndex(of:":") else {return false}
+            let value=String(line[line.index(after:colon)...]).trimmingCharacters(in:.whitespaces).lowercased()
+            guard value != "site",!value.hasPrefix("loading"),!value.hasPrefix("you said"),!value.hasPrefix("chatgpt said"),!value.hasPrefix("skip to") else {return false}
+            return value.count>=12 || line.hasPrefix("heading:") || line.hasPrefix("webarea:")
+        }
+        return content
+    }
+    static func spokenReadout(_ excerpt:String, selected:[Int]) -> String {
+        let lines=readableLines(excerpt)
+        var seen=Set<Int>()
+        var chosen=selected.filter {lines.indices.contains($0) && seen.insert($0).inserted}.prefix(3).map {lines[$0]}
+        if chosen.isEmpty {chosen=Array(lines.prefix(3))}
+        let text=chosen.map { line -> String in
+            let value=line.firstIndex(of:":").map {String(line[line.index(after:$0)...]).trimmingCharacters(in:.whitespaces)} ?? line
+            return String(value.prefix(240))
+        }.joined(separator:". ")
+        guard !text.isEmpty else {return "This window is not exposing enough page text for a reliable readout yet."}
+        return "Here is text I can read from this window. " + text + (excerpt.contains("Partial window excerpt") ? ". This is a partial readout." : "")
+    }
     static func describe(app: String) async -> String {
         await Task.detached(priority: .userInitiated) {
             let binary: URL
@@ -47,14 +74,39 @@ struct ScreenContext {
             let role = node["role"] as? String ?? ""
             guard !role.lowercased().contains("secure"), node["protected"] as? Bool != true else { return }
             let parts = [node["name"], node["value"], node["description"]].compactMap { $0 as? String }.filter { !$0.isEmpty }
-            let content = parts.joined(separator: " · ")
+            var partSet=Set<String>()
+            let content = parts.filter {partSet.insert($0).inserted}.joined(separator: " · ")
             if !content.isEmpty && seen.insert(content).inserted {
                 let line = String("\(role): \(content)".prefix(min(500, remaining)))
                 lines.append(line); remaining -= line.count
             }
             for child in node["children"] as? [[String: Any]] ?? [] { walk(child) }
         }
-        if let tree = data["tree"] as? [String: Any] { walk(tree) }
+        if let tree = data["tree"] as? [String: Any] {
+            // Browser chrome and host sidebars must not consume the page budget.
+            // Embedded pages are often deeper than the surrounding chat interface.
+            var pages:[(Int,[String:Any])]=[], mains:[[String:Any]]=[]
+            func findContent(_ node:[String:Any],_ depth:Int) {
+                let role=(node["role"] as? String ?? "").lowercased()
+                guard !role.contains("secure"),node["protected"] as? Bool != true else {return}
+                if role=="webarea" {pages.append((depth,node))}
+                if role=="main" || role=="article" {mains.append(node)}
+                for child in node["children"] as? [[String:Any]] ?? [] {findContent(child,depth+1)}
+            }
+            findContent(tree,0)
+            if !pages.isEmpty {
+                for (_,page) in pages.sorted(by:{$0.0>$1.0}) {
+                    func readMain(_ node:[String:Any]) {
+                        let role=(node["role"] as? String ?? "").lowercased()
+                        guard !role.contains("secure"),node["protected"] as? Bool != true else {return}
+                        if role=="main" || role=="article" {walk(node);return}
+                        for child in node["children"] as? [[String:Any]] ?? [] {readMain(child)}
+                    }
+                    readMain(page);walk(page)
+                }
+            } else if !mains.isEmpty {for main in mains {walk(main)}}
+            else {walk(tree)}
+        }
         if lines.isEmpty { return "The window exposed no readable text. Do not guess its contents." }
         if data["complete"] as? Bool == false || remaining <= 0 { lines.append("Partial window excerpt; more content may exist.") }
         return lines.joined(separator: "\n")

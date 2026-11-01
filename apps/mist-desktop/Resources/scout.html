@@ -2982,14 +2982,14 @@ document.addEventListener('keydown', e => { if(e.key === 'Escape') nativePost('s
 let nativeDrag = null, scoutDragDistance=0;
 fc.addEventListener('pointerdown', e => { scoutDragDistance=0; nativeDrag = {x:e.screenX,y:e.screenY}; fc.setPointerCapture(e.pointerId); nativePost('dragStart'); });
 fc.addEventListener('pointermove', e => { if(nativeDrag) { scoutDragDistance+=Math.hypot(e.screenX-nativeDrag.x,e.screenY-nativeDrag.y); nativePost('drag',{dx:e.screenX-nativeDrag.x,dy:e.screenY-nativeDrag.y}); nativeDrag={x:e.screenX,y:e.screenY}; }});
-fc.addEventListener('pointerup', () => { const clicked=nativeDrag&&scoutDragDistance<5;nativeDrag=null; nativePost('dragEnd');if(clicked)nativePost('toggle'); });
+fc.addEventListener('pointerup', () => { const clicked=nativeDrag&&scoutDragDistance<5;nativeDrag=null; nativePost('dragEnd');if(clicked)nativePost('scoutSummon'); });
 fc.addEventListener('pointercancel', () => { nativeDrag=null; nativePost('dragEnd'); });
 nativePost('ready');
 
 window.nativeScout=!!window.ROVE_NATIVE_SCOUT;window.roveNativeScout=(active)=>{window.nativeScout=active;scoutCanvas.style.display=ground.style.display=lamps.style.display=active?'none':'';if(active)scoutGPU?.gl.getExtension('WEBGL_lose_context')?.loseContext();};
-window.scoutMode=true;fc.style.opacity='1';fc.setAttribute('role','button');fc.setAttribute('aria-label','Talk to Scout');fc.tabIndex=0;fc.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nativePost('toggle');}});
+window.scoutMode=true;fc.style.opacity='1';fc.setAttribute('role','button');fc.setAttribute('aria-label','Talk to Scout');fc.tabIndex=0;fc.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nativePost('scoutSummon');}});
 const roverStyle=document.createElement('style');
-roverStyle.textContent='html.app{--pw:100vw;--head:54px;--ph:250px;--bar:310px}#scoutGround{position:fixed;inset:0;width:300px;height:380px;pointer-events:none}.float{z-index:4}.think,.pill,.saywrap{z-index:8}.think .bub{-webkit-line-clamp:2;font-size:12px;padding:8px 10px}.think .bub .src{display:none}';document.head.appendChild(roverStyle);
+roverStyle.textContent='html.app{--pw:100vw;--head:54px;--ph:250px;--bar:310px}#scoutGround{position:fixed;inset:0;width:300px;height:380px;pointer-events:none}.float{z-index:4}.think,.pill,.saywrap{z-index:8}.think .bub{-webkit-line-clamp:2;font-size:12px;padding:8px 10px}.think .bub .src{display:none}.think{visibility:hidden}body.rove-needs-attention .think{visibility:visible}#mic{display:none!important}';document.head.appendChild(roverStyle);
 const ground=document.createElement('canvas');ground.id='scoutGround';ground.width=600;ground.height=760;document.body.appendChild(ground);
 const groundContext=ground.getContext('2d');
 const lamps=document.createElement('canvas');lamps.width=600;lamps.height=760;lamps.style.cssText='position:fixed;inset:0;width:300px;height:380px;pointer-events:none;z-index:5';document.body.appendChild(lamps);const lampContext=lamps.getContext('2d');
@@ -3001,7 +3001,7 @@ document.body.appendChild(scoutCanvas);
 const scoutGPU=window.nativeScout?null:CastingGL.open(scoutCanvas),scoutModel={set:'objects',id:'scout'},scoutEntry={};
 let scoutMode=0,scoutSince=performance.now()/1000,scoutLast=0;
 const priorState=window.mistState;
-window.mistState=(state,text)=>{priorState(state,text);scoutMode=({idle:0,listening:1,thinking:2,speaking:3})[state]??0;scoutSince=performance.now()/1000;};
+window.mistState=(state,text)=>{priorState(state,text);document.body.classList.toggle('rove-needs-attention',state==='error');fc.setAttribute('aria-label','Scout: '+state+'. Talk or interrupt');scoutMode=({idle:0,listening:1,thinking:2,speaking:3})[state]??0;scoutSince=performance.now()/1000;};
 function scoutFrame(now){
  if(window.nativeScout)return;
  requestAnimationFrame(scoutFrame);

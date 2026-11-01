@@ -8,6 +8,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     var heading: Float = 0
     var distance: Float = 0
     var moving = false
+    var faceRequested = false
     var viewingDistance: Double = 550
     private var lid: LidAngle?
     private var baselineAngle: Double?
@@ -70,13 +71,13 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
-                heading,distance,["listening":Float(1),"thinking":2,"speaking":3][state] ?? 0,lift,
+                heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":4][state] ?? 0,lift,
                 Float(Date().timeIntervalSince(entered)),headroom,0,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
         let now=Date(),dt=Float(min(0.05,now.timeIntervalSince(previous)));previous=now
-        let target: Float = !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
+        let target: Float = faceRequested && !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { lift=target;liftVelocity=0 }
         else {
             liftVelocity += ((target-lift)*64-liftVelocity*16)*dt

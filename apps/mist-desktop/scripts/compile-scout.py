@@ -11,8 +11,9 @@ body = lib['objects']['scout']['body']
 # add two small front-edge lamps, and preserve linear extended-range output.
 body = body.replace('return obj;', '''obj=scAdd(obj,scBox(p-vec3(-.46,.43,.568),vec3(.074,.035,.026),.016),12.);
     obj=scAdd(obj,scBox(p-vec3(.46,.43,.568),vec3(.074,.035,.026),.016),12.);
+    obj=scAdd(obj,scBox(p-vec3(0.,.484,.20),vec3(.43,.022,.16),.025),13.);
     return obj;''', 1)
-body = body.replace('vec3 linear;','vec3 linear;').replace('if(h.y==3. && n.z>.94)', 'if(h.y==12.) { linear=vec3(4.,3.7,2.8); } else if(h.y==3. && n.z>.94)')
+body = body.replace('vec3 linear;','vec3 linear;').replace('if(h.y==3. && n.z>.94)', 'if(h.y==13.) { linear=scRoof(p); } else if(h.y==12.) { linear=vec3(4.,3.7,2.8); } else if(h.y==3. && n.z>.94)')
 body = body.replace('return clamp(pow(max(linear,vec3(0.)),vec3(.45455)),0.,1.);','return max(linear,vec3(0.));')
 body = re.sub(r'void scCamera\(.*?\n}\n', '''vec3 worldToScout(vec3 p) {
     // Heading about the screen normal, followed by the physical pickup tilt.
@@ -31,6 +32,47 @@ void scCamera(vec2 uv,vec2 orbit,out vec3 ro,out vec3 rd) {
 ''',body,flags=re.S)
 body=body.replace('uDriveDistance*.066','(U.pose.y/(U.viewport.z*.295))')
 body=re.sub(r'\bpatch\b','groundPatch',body)
+roof = """int roofGlyph(int code){
+ if(code==65)return 11245;
+ if(code==68)return 27502;
+ if(code==69)return 31143;
+ if(code==72)return 23533;
+ if(code==73)return 29847;
+ if(code==75)return 23469;
+ if(code==76)return 18727;
+ if(code==78)return 24573;
+ if(code==79)return 31599;
+ if(code==82)return 27565;
+ if(code==83)return 31183;
+ if(code==84)return 29842;
+ if(code==89)return 23186;
+ return 0;
+}
+int roofLetter(int index){
+ if(U.pose.z<.5){int word[5]=int[5](82,69,65,68,89);return index<5?word[index]:0;}
+ if(U.pose.z<1.5){int word[6]=int[6](76,73,83,84,69,78);return word[index];}
+ if(U.pose.z<2.5){int word[5]=int[5](84,72,73,78,75);return index<5?word[index]:0;}
+ if(U.pose.z<3.5){int word[4]=int[4](84,65,76,75);return index<4?word[index]:0;}
+ int word[5]=int[5](69,82,82,79,82);return index<5?word[index]:0;
+}
+vec3 scRoof(vec3 p){
+ vec2 surface=(p.xz-vec2(0.,.20))/vec2(.80,.26)+.5;
+ vec2 pixel=vec2(surface.x*26.,(1.-surface.y)*9.);
+ ivec2 cell=ivec2(floor(pixel));
+ int count=U.pose.z<.5?5:U.pose.z<1.5?6:U.pose.z<2.5?5:U.pose.z<3.5?4:5;
+ int x=cell.x-(26-(count*4-1))/2,y=cell.y-2;
+ float dotInk=0.;
+ if(x>=0&&x<count*4&&y>=0&&y<5&&x%4<3){
+   int bit=14-(y*3+x%4);
+   dotInk=float((roofGlyph(roofLetter(x/4))>>bit)&1);
+ }
+ vec2 dotUV=fract(pixel)-.5;
+ float aperture=1.-smoothstep(.34,.48,max(abs(dotUV.x),abs(dotUV.y)));
+ vec3 glass=vec3(.012,.021,.023);
+ vec3 phosphor=vec3(.89,.626,.245);
+ return glass+phosphor*dotInk*aperture*1.35;
+}
+"""
 source='''#version 450
 layout(location=0) out vec4 outputColor;
 layout(set=0,binding=0,std140) uniform NativeUniforms {
@@ -41,7 +83,7 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
 } U;
 #define uResolution U.viewport.xy
 #define uDriveDistance U.pose.y
-'''+lib['objects']['scout']['face']+body+'''
+'''+roof+lib['objects']['scout']['face']+body+'''
 void main(){
  // A pixel is a real point on the display, not a rotated portrait quad.
  vec2 pixel=vec2(gl_FragCoord.x,U.viewport.y-gl_FragCoord.y)/U.viewport.w;
@@ -83,5 +125,5 @@ vertex float4 scout_vertex(uint id [[vertex_id]]) {
  return float4(id==1?3.:-1.,id==2?3.:-1.,0.,1.);
 }
 '''
-(root/'Resources/scout.metal').write_text('// Derived from the selected Casting Room Scout SDF. Regenerate with scripts/compile-scout.py.\n'+metal)
+(root/'Resources/scout.metal').write_text('// Derived from the selected Casting Room Scout SDF. Regenerate with scripts/compile-scout.py.\n'+'\n'.join(line.rstrip() for line in metal.splitlines())+'\n')
 print('Wrote native Scout Metal shader')
