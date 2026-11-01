@@ -111,7 +111,7 @@ window.CastingGL=(()=>{
       }
     }
     function clocks(p,pose){
-      f(p,'uEvent',pose.mode);f(p,'uSince',pose.age);f(p,'uTime',pose.time);f(p,'uReduce',pose.reduced?1:0);
+      f(p,'uDriveDistance',pose.distance||0);f(p,'uEvent',pose.mode);f(p,'uSince',pose.age);f(p,'uTime',pose.time);f(p,'uReduce',pose.reduced?1:0);
       pair(p,'uLook',pose.lookX,pose.lookY);pair(p,'uPixelOrigin',0,0);
     }
     function releasePortrait(e){release(e.image);release(e.beauty);e.image=null;e.beauty=null;e.cacheKey='';}

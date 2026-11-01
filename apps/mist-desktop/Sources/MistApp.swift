@@ -47,6 +47,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var idleTimer: Timer?
     private var permissionsPending = false
     private var tossTimer: Timer?
+    private var driveTimer: Timer?
+    private var rover = RoverDrive(position:.zero)
+    private var driveRoute: [CGPoint] = []
+    private var companionID = "character"
     private var velocity = NSPoint.zero
     private var lastDrag = Date()
     private var monitor: Any?
@@ -97,6 +101,9 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for (title, action, key) in [("Talk / interrupt", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
+        for (title,action) in [("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(parkRover))] {
+            let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
+        }
         let companions = NSMenuItem(title: "Companion", action: nil, keyEquivalent: "")
         let choices = NSMenu()
         for (title, id) in [("White handheld + sticky hand", "handheld"), ("Pixel face", "character"), ("Orbloom", "orb"), ("Scout · Casting Room", "scout")] {
@@ -113,6 +120,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private func loadCompanion() {
         let chosen = UserDefaults.standard.string(forKey: "companion") ?? "character"
         let id = ["character", "orb", "handheld", "scout"].contains(chosen) ? chosen : "character"
+        parkRover(); companionID = id
+        panel.setContentSize(id == "scout" ? NSSize(width:300,height:380) : NSSize(width:202,height:490))
+        panel.setFrameOrigin(bounded(panel.frame.origin))
+        rover.position = panel.frame.origin
         ready = false
         handheld?.view.isPaused = true; handheld?.view.removeFromSuperview(); handheld = nil
         if id == "handheld", let host = panel.contentView {
@@ -147,6 +158,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func quit() { NSApplication.shared.terminate(nil) }
     @objc private func stop() {
         generation += 1; responseTask?.cancel(); responseTask = nil
+        parkRover()
         if state == "thinking" { session = nil }
         idleTimer?.invalidate(); idleTimer = nil
         audio.end(); update("idle", "Microphone off")
@@ -170,6 +182,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     private func startListening() {
+        parkRover()
         do {
             try audio.start()
             update("listening", "Listening…")
@@ -238,14 +251,21 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "stop": stop()
         case "text": if let text = body["text"] as? String { respond(String(text.prefix(2000))) }
         case "speak": break
-        case "dragStart": tossTimer?.invalidate(); velocity = .zero; lastDrag = Date()
+        case "dragStart":
+            tossTimer?.invalidate(); velocity = .zero; lastDrag = Date()
+            if companionID == "scout" { parkRover(); rover.position = panel.frame.origin }
         case "drag":
             guard let dx = body["dx"] as? Double, let dy = body["dy"] as? Double else { return }
+            if companionID == "scout" {
+                let old = rover.target ?? rover.position
+                rover.target = bounded(CGPoint(x:old.x+dx,y:old.y-dy)); startDriveTimer(); return
+            }
             let dt = max(0.016, Date().timeIntervalSince(lastDrag)); lastDrag = Date()
             velocity = NSPoint(x: dx / dt, y: -dy / dt)
             handheld?.swing = Float(max(-0.5,min(0.5,dx * 0.015)))
             move(dx, -dy)
         case "dragEnd":
+            if companionID == "scout" { return }
             tossTimer = Timer.scheduledTimer(withTimeInterval: 1 / 60, repeats: true) { [weak self] timer in
                 guard let self else { timer.invalidate(); return }
                 self.velocity.x *= 0.90; self.velocity.y *= 0.90
@@ -254,6 +274,39 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
         default: break
         }
+    }
+    @objc private func parkRover() {
+        driveTimer?.invalidate(); driveTimer = nil; driveRoute.removeAll(); rover.park()
+        sendDrivePose()
+    }
+    @objc private func driveScoutLoop() {
+        guard companionID == "scout" else { return }
+        parkRover(); rover.position = panel.frame.origin
+        let p = rover.position
+        let direction = ((panel.screen?.visibleFrame.maxX ?? 1000) - panel.frame.maxX) > 150 ? 1.0 : -1.0
+        driveRoute = [bounded(CGPoint(x:p.x+140*direction,y:p.y)),bounded(CGPoint(x:p.x+140*direction,y:p.y+110)),bounded(CGPoint(x:p.x,y:p.y+110)),p]
+        rover.target = driveRoute.removeFirst(); startDriveTimer()
+    }
+    private func bounded(_ point: CGPoint) -> CGPoint {
+        guard let area = (panel.screen ?? NSScreen.main)?.visibleFrame else { return point }
+        return CGPoint(x:min(area.maxX-panel.frame.width,max(area.minX,point.x)),y:min(area.maxY-panel.frame.height,max(area.minY,point.y)))
+    }
+    private func startDriveTimer() {
+        guard driveTimer == nil else { return }
+        driveTimer = Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
+            guard let self else { timer.invalidate(); return }
+            let moving = self.rover.step(1/60)
+            self.rover.position = self.bounded(self.rover.position)
+            self.panel.setFrameOrigin(self.rover.position); self.sendDrivePose()
+            if !moving {
+                if self.driveRoute.isEmpty { timer.invalidate(); self.driveTimer = nil }
+                else { self.rover.target = self.driveRoute.removeFirst() }
+            }
+        }
+    }
+    private func sendDrivePose() {
+        guard ready,companionID == "scout" else { return }
+        web.evaluateJavaScript("window.roveDrive?.(\(rover.heading),\(rover.speed),\(rover.distance))",completionHandler:nil)
     }
     private func move(_ dx: Double, _ dy: Double) {
         guard let screen = panel.screen ?? NSScreen.main else { return }
@@ -264,7 +317,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         decisionHandler(navigationAction.request.url?.isFileURL == true ? .allow : .cancel)
     }
     func applicationWillTerminate(_ notification: Notification) {
-        stop(); motion.stop(); tossTimer?.invalidate()
+        stop(); motion.stop(); tossTimer?.invalidate(); parkRover()
         if let monitor { NSEvent.removeMonitor(monitor) }
         if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
     }

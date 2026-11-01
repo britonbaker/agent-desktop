@@ -60,3 +60,11 @@ Scout is available under Companion → Scout · Casting Room. Its original surve
 This first Scout import is SDR WebGL. Native HDR needs a shader adaptation; the existing white handheld uses native Metal HDR. A WebGL shader, recorded turn sprites, and a mesh have different import requirements. The collection itself is at https://companion-casting-room.britonbaker.chatgpt.site/.
 
 Idle face animation is capped around 20 frames per second, active animation around 30. Scout uses a 288 × 252 cached render target, about 12 idle frames per second and 25 active frames per second. Native eye geometry remains unchanged; dark neutral lid shades and lens masking prevent gray lids and bright lens bands. Body/handle/hand highlights use extended-range brightness on the Metal handheld. Only the selected companion is mounted. Keyboard-recency system queries are cached for 20 milliseconds while motion samples retain their original timing. These changes reduce scheduled work; no whole-app CPU or power reduction percentage has been established.
+
+## Scout driving prototype
+
+Scout now uses a 62-degree overhead camera on the original shader geometry. Guide him by dragging; the native drive controller steers and brakes toward the destination instead of applying the floating companion's release momentum. The menu offers **Drive Scout in a small loop** and **Park Scout**. Stop, listening, switching companions, and quitting cancel the route. Movement stays inside the current screen's visible frame.
+
+Wheel tread and hub rotation follow traveled distance. Two forward lamps and soft cones rotate with the heading, while body and wheel-contact shadows sit beneath the transparent rover. These are screen-space lighting overlays, not changes to other apps' pixels or a physical light simulation. Scout remains SDR; the handheld's native HDR renderer is separate.
+
+`Tests/RoverDriveTests.swift` checks arrival, braking, speed and turning limits, parked behavior, traveled distance, and a bounded time step after a stall. The live app's loop was visually checked at changing headings with aligned lights and shadow.
