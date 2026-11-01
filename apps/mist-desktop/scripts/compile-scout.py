@@ -24,11 +24,13 @@ body=body.replace('vec2 grid=style<5.5?vec2(25.,14.):style<6.5?vec2(64.,12.):vec
 camera='''vec3 worldToScout(vec3 p) {
  float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
  float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
- float a=U.pose.w*1.5707963+U.options.z,cx=cos(a),sx=sin(a);
+ float cr=cos(U.wall.y),sr=sin(U.wall.y);p=vec3(cr*p.x+sr*p.y,-sr*p.x+cr*p.y,p.z);
+ float a=U.pose.w*1.5707963+U.options.z+U.wall.x,cx=cos(a),sx=sin(a);
  return vec3(p.x,cx*p.y-sx*p.z,sx*p.y+cx*p.z);
 }
 vec3 scoutPoint(vec3 p){
- p=worldToScout(p-vec3(0.,U.pose.w*1.05,0.));
+ float rise=U.wall.z-.767*(1.-cos(U.wall.x)*cos(U.wall.y));
+ p=worldToScout(p-vec3(0.,U.pose.w*1.05+rise,0.));
  float a=U.options.z,c=cos(a),s=sin(a);vec3 pivot=vec3(0.,-.472,-.431);
  return p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z);
 }
@@ -45,6 +47,7 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 viewport; vec4 eye; vec4 pose; vec4 options;
  vec4 outfit; // optics, paint, face, lamp power
  vec4 mechanics; // lamp hinge, shadow enabled, track fade, roof face
+ vec4 wall; // contact pitch, bank, rise, reserved
 } U;
 #define uResolution U.viewport.xy
 #define uEvent U.pose.z
@@ -89,7 +92,7 @@ void main(){
  float c=cos(U.pose.x),s=sin(U.pose.x);
  vec2 floorPoint=vec2(c*uv.x-s*uv.y,s*uv.x+c*uv.y);
  float detail=clamp(U.viewport.z/55.,.1,1.);
- float shade=.45*scoutCastOpacity(floorPoint)*(1.-.35*U.pose.w)*(floorPoint.y>0.?exp(-U.options.z*3.):1.);
+ float shade=.45*scoutCastOpacity(floorPoint)*(1.-.35*U.pose.w)*exp(-U.wall.z*.9)*(floorPoint.y>0.?exp(-U.options.z*3.):1.);
  float dust=0.; // Fixed desktop tire marks are drawn in a separate receiver below this shadow.
  float floorAlpha=shade+(1.-shade)*dust;
  vec3 floorRGB=vec3(.003,.005,.008)*shade+vec3(.119,.113,.094)*dust*(1.-shade);

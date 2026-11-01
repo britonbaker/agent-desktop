@@ -85,12 +85,16 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let camera=ScoutCamera(millimetersPerPoint:mmPerPoint,screenSize:frame.size,roverCenter:center,viewingDistance:viewingDistance,hingeDelta:number.map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } == true ? hingeDelta : 0)
         let eye=camera.eye
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
+        let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : ScoutWall.pose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(camera.pointsPerUnit),area:frame)
+        let frontPresented=lift>0.08 || renderedWheelie>0.12 || wall.pitch>0.12
+        let showRoofFace = !frontPresented && (roofFace || ["listening","thinking","speaking"].contains(state))
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
                 heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
-                Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0,
+                Float(Date().timeIntervalSince(entered)),headroom,wall.contact ? 0 : renderedWheelie,0,
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
-                lampLift,shadow ? 1 : 0,tracks ? 1 : 0,(roofFace || ["listening","thinking","speaking"].contains(state)) ? 1 : 0]
+                lampLift,shadow ? 1 : 0,tracks ? 1 : 0,showRoofFace ? 1 : 0,
+                Float(wall.pitch),Float(wall.roll),Float(wall.height),0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
@@ -112,7 +116,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
                 let scale=Double(uniforms(width:600,height:760)[2])
-                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05,grounded:lift<0.05,window:window)
+                let wall=ScoutWall.pose(center:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,area:window.screen?.frame ?? .zero)
+                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05 && abs(wall.pitch)<0.05,grounded:lift<0.05 && abs(wall.roll)<0.05,window:window)
             } else {trackOverlay?.clear()}
         }
         guard let drawable=view.currentDrawable,let command=queue.makeCommandBuffer() else { return }
@@ -154,7 +159,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0)] {
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0)] {
             let w=600,h=760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
@@ -162,6 +167,12 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
             if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
             if name.hasPrefix("roof-face") {values[23]=1;values[10]=name=="roof-face-speaking" ? 3 : 1}
+            if name.hasPrefix("wall-") {
+                let corner=name=="wall-corner",angle=corner ? -0.4 : -0.6
+                let wall=ScoutWall.pose(center:CGPoint(x:35,y:corner ? 947 : 400),heading:angle,scale:55,area:CGRect(x:0,y:0,width:1512,height:982))
+                values[8]=Float(angle);values[14]=0;values[24]=Float(wall.pitch);values[25]=Float(wall.roll);values[26]=Float(wall.height);values[23]=1
+            }
+            if values[11]>0.08 || values[14]>0.12 || values[24]>0.12 {values[23]=0}
             encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
             if let error=command.error {throw error}
             var raw=[UInt16](repeating:0,count:w*h*4)
