@@ -8,6 +8,11 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if let index=CommandLine.arguments.firstIndex(of:"--actions-self-test"),CommandLine.arguments.count>index+1 {
+            setbuf(stdout,nil)
+            Task { @MainActor in do {try await runDesktopActionsTests(statePath:CommandLine.arguments[index+1]);exit(0)} catch {print("FAIL:",error);exit(1)}}
+            RunLoop.main.run();return
+        }
         if let index=CommandLine.arguments.firstIndex(of:"--app-catalog-test"),CommandLine.arguments.count>index+1 {
             let name=CommandLine.arguments[index+1]
             let matches=DesktopAgent.availableApps().filter {$0.name.localizedCaseInsensitiveCompare(name) == .orderedSame}
@@ -175,6 +180,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var lastExternalApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
     private var lastExternalPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
     private var appObserver: NSObjectProtocol?
+    private var lockObserver:NSObjectProtocol?
     private let profileURL = URL.applicationSupportDirectory.appendingPathComponent("Rove/tap-profile.json")
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -188,6 +194,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification,object:nil,queue:.main) { [weak self] note in
             if let app=note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {self?.rememberApp(app)}
         }
+        lockObserver=NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.sessionDidResignActiveNotification,object:nil,queue:.main) { [weak self] _ in self?.stop() }
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "mist")
         web = WKWebView(frame: .zero, configuration: config)
@@ -428,7 +435,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     @objc private func show() { panel.orderFrontRegardless() }
     @objc private func quit() { NSApplication.shared.terminate(nil) }
-    @objc private func stop() {endConversation()}
+    @objc private func stop() {endConversation();desktopAgent.cancelActions()}
     private func endConversation(preserveGreeting:Bool=false) {
         cueTask?.cancel();cueTask=nil;robotSounds.stop()
         conversationActive=false
@@ -473,7 +480,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         do {
             try audio.start()
             update("listening", "Listening…")
-            idleTimer = Timer.scheduledTimer(withTimeInterval: 35, repeats: false) { [weak self] _ in self?.stop() }
+            idleTimer = Timer.scheduledTimer(withTimeInterval: desktopAgent.awaitingConfirmation ? 120 : 35, repeats: false) { [weak self] _ in self?.stop() }
         } catch { update("error", error.localizedDescription) }
     }
     private func respond(_ text: String) {

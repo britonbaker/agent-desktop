@@ -30,6 +30,7 @@ final class ScoutTrackOverlay {
     private var timer:Timer?
     private weak var roverWindow:NSWindow?
     private var orderedWindow:Int?
+    private var orderingAnchor:Int?
     init(images:[CGImage]) {
         canvas.images=images
         panel=NSPanel(contentRect:.zero,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
@@ -38,8 +39,9 @@ final class ScoutTrackOverlay {
         panel.ignoresMouseEvents=true;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
         panel.contentView=canvas
     }
-    func update(position:CGPoint,heading:Double,scale:Double,frontContact:Bool,grounded:Bool,window:NSWindow) {
+    func update(position:CGPoint,heading:Double,scale:Double,frontContact:Bool,grounded:Bool,window:NSWindow,belowWindow:Int?=nil) {
         roverWindow=window
+        orderingAnchor=belowWindow ?? window.windowNumber
         trail.update(position:position,heading:heading,scale:scale,time:ProcessInfo.processInfo.systemUptime,frontContact:frontContact,grounded:grounded)
         if !trail.marks.isEmpty,timer==nil {
             let clock=Timer(timeInterval:1/30,repeats:true) { [weak self] _ in self?.refresh() }
@@ -60,7 +62,8 @@ final class ScoutTrackOverlay {
         rectangle=rectangle.integral
         if panel.frame != rectangle {panel.setFrame(rectangle,display:false)}
         canvas.desktopOrigin=rectangle.origin;canvas.marks=trail.marks;canvas.now=now;canvas.needsDisplay=true
-        if !panel.isVisible || orderedWindow != window.windowNumber {panel.order(.below,relativeTo:window.windowNumber);orderedWindow=window.windowNumber}
+        let anchor=orderingAnchor ?? window.windowNumber
+        if !panel.isVisible || orderedWindow != anchor {panel.order(.below,relativeTo:anchor);orderedWindow=anchor}
     }
     static func writeProof(images:[CGImage],roverPNG:URL,directory:String) throws {
         let url=URL(fileURLWithPath:directory).appendingPathComponent("desktop-tracks.gif")

@@ -6,6 +6,9 @@ original=(root/'Resources/scout-study-source.glsl').read_text()
 body=original[:original.index('// 5 x 7 column masks')]
 body=re.sub(r'\bpatch\b','groundPatch',body)
 body=re.sub(r'^precision .*?;\n|^uniform .*?;\n','',body,flags=re.M)
+body='vec3 worldToScout(vec3 p);\n'+body
+for key in ['vec3(-.51,.90,.68)','vec3(-.55,.76,.47)']:
+ body=body.replace('normalize('+key+')','normalize(worldToScout('+key+'))')
 body=body.replace('smoothstep(1.78,3.055,max(0.,rear))','smoothstep(.25,1.10,max(0.,rear))')
 body=body.replace('scKitRoll=scKitOn && mode==7.?angle-.106*sin(angle):0.;','scKitRoll=U.pose.y/(U.viewport.z*.295);')
 body=re.sub(r'float scoutTravel\(float age\)\{.*?\n}', 'float scoutTravel(float age){return max(0.,U.pose.y/U.viewport.z);}',body,flags=re.S)
@@ -48,6 +51,7 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 outfit; // optics, paint, face, lamp power
  vec4 mechanics; // lamp hinge, shadow enabled, track fade, roof face
  vec4 wall; // contact pitch, bank, rise, reserved
+ vec4 receiver; // rover center in receiver points, reserved, pass (0 body, 1 floor, 2 proof)
 } U;
 #define uResolution U.viewport.xy
 #define uEvent U.pose.z
@@ -59,16 +63,32 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
 #define uLook vec2(0.)
 #define uReduce 0.
 '''
+ground='''
+float nativeShadow(vec2 uv,float style){
+ if(U.mechanics.y<.5||length(uv)>3.6)return 0.;
+ // Trace the authored geometry toward one fixed desktop-space studio light.
+ vec3 p=scoutPoint(vec3(uv.x,-.767,uv.y));
+ vec3 light=normalize(worldToScout(vec3(-.51,.90,.68)));
+ float t=.022,visibility=1.;
+ for(int i=0;i<32;i++){
+  float d=studySDF(p+light*t,style).x;
+  if(d<.0018)return .42;
+  visibility=min(visibility,10.*d/max(t,.02));
+  t+=max(.012,d*.85);if(t>4.2)break;
+ }
+ return .42*(1.-clamp(visibility,0.,1.));
+}
+'''
 main='''
 void main(){
  vec2 pixel=vec2(gl_FragCoord.x,U.viewport.y-gl_FragCoord.y)/U.viewport.w;
- vec2 uv=(pixel-vec2(150.,200.))/U.viewport.z;
+ vec2 uv=(pixel-U.receiver.xy)/U.viewport.z;
  float style=U.outfit.x;bool kit=style>=3.5;
  kitLift=U.mechanics.x;scKitPose(kit?1.:0.,U.pose.z,U.options.x);
  float power=U.outfit.w*(kit?liftLampGain():1.);if(style<.5)power=0.;
  vec3 ro,rd;scCamera(uv,vec2(0.),ro,rd);
  float along=dot(ro,rd),disc=along*along-dot(ro,ro)+3.24,depth=10000.;vec2 hit=vec2(0.);
- if(disc>0.){
+ if(U.receiver.w!=1.&&disc>0.){
   float t=max(0.,-along-sqrt(disc)),end=-along+sqrt(disc);
   for(int i=0;i<112;i++){
    vec2 probe=studySDF(ro+rd*t,style);
@@ -92,14 +112,14 @@ void main(){
  float c=cos(U.pose.x),s=sin(U.pose.x);
  vec2 floorPoint=vec2(c*uv.x-s*uv.y,s*uv.x+c*uv.y);
  float detail=clamp(U.viewport.z/55.,.1,1.);
- float shade=.45*scoutCastOpacity(floorPoint)*(1.-.35*U.pose.w)*exp(-U.wall.z*.9)*(floorPoint.y>0.?exp(-U.options.z*3.):1.);
+ float shade=U.receiver.w>0.?nativeShadow(uv,style):0.;
  float dust=0.; // Fixed desktop tire marks are drawn in a separate receiver below this shadow.
  float floorAlpha=shade+(1.-shade)*dust;
  vec3 floorRGB=vec3(.003,.005,.008)*shade+vec3(.119,.113,.094)*dust*(1.-shade);
  // Each authored angular beam originates at its real lens, including hinge and chassis tilt.
  vec3 floorLocal=scoutPoint(vec3(uv.x,-.767,uv.y));
  vec3 floorNormal=worldToScout(vec3(0.,1.,0.)),light=vec3(0.);
- if(power>0.)for(int k=0;k<2;k++){
+ if(U.receiver.w>0.&&power>0.)for(int k=0;k<2;k++){
   float side=k==0?-1.:1.;vec3 d=floorLocal-studyLampOrigin(style,side);
   float d2=dot(d,d);vec3 ray=d*inversesqrt(max(.0001,d2));
   vec3 opticRay=kit?liftLampReferenceDirection(ray):ray;
@@ -109,8 +129,7 @@ void main(){
  float lightPeak=max(light.r,max(light.g,light.b));
  float lightAlpha=.18*(1.-exp(-lightPeak*.5));
  floorRGB+=light*.055*(1.-floorAlpha);floorAlpha+=lightAlpha*(1.-floorAlpha);
- float edge=min(min(pixel.x,300.-pixel.x),min(pixel.y,380.-pixel.y));
- float fade=smoothstep(0.,18.,edge);floorRGB*=fade;floorAlpha*=fade;
+ float fade=1.-smoothstep(430.,490.,length(pixel-U.receiver.xy));floorRGB*=fade;floorAlpha*=fade;
  vec3 rgb=color*coverage+floorRGB*(1.-coverage);
  float alpha=coverage+floorAlpha*(1.-coverage);
  float peak=max(rgb.r,max(rgb.g,rgb.b));rgb*=min(1.,U.options.y/max(peak,.0001));
@@ -118,7 +137,7 @@ void main(){
 }
 '''
 with tempfile.TemporaryDirectory() as tmp:
- frag=pathlib.Path(tmp)/'scout.frag';spv=pathlib.Path(tmp)/'scout.spv';frag.write_text(header+body+extra+main)
+ frag=pathlib.Path(tmp)/'scout.frag';spv=pathlib.Path(tmp)/'scout.spv';frag.write_text(header+body+extra+ground+main)
  subprocess.run(['glslangValidator','-V',str(frag),'-o',str(spv)],check=True)
  metal=subprocess.check_output(['spirv-cross',str(spv),'--msl'],text=True)
 # SPIR-V strips the receiver helper once it is removed from Rove's body pass.

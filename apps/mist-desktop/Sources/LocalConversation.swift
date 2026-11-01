@@ -131,7 +131,7 @@ final class LocalConversation {
         audioLock.lock(); request?.endAudio(); audioLock.unlock()
         task?.cancel(); turn.reset()
         let req = SFSpeechAudioBufferRecognitionRequest(); req.requiresOnDeviceRecognition = true; req.shouldReportPartialResults = true; req.taskHint = .dictation
-        req.contextualStrings = ["apps", "list apps", "what apps are running", "where am I", "read", "controls", "switch to", "repeat", "stop", "wait", "end conversation"] + NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
+        req.contextualStrings = ["apps", "list apps", "what apps are running", "where am I", "read", "controls", "switch to", "click", "type", "scroll", "confirm action", "do it now", "cancel", "repeat", "stop", "wait", "end conversation"] + NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
         audioLock.lock(); request = req; audioLock.unlock()
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             DispatchQueue.main.async {

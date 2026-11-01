@@ -7,6 +7,8 @@ import FoundationModels
     }
     let apps=[DesktopApp(id:"com.apple.finder",name:"Finder",pid:1),DesktopApp(id:"com.apple.Safari",name:"Safari",pid:2),DesktopApp(id:"com.google.Chrome",name:"Google Chrome",pid:3)]
     let agent=DesktopAgent()
+    try require(!DesktopAgent.actionTargetIsReferenced(apps[1],request:"Type \"Safari\" into the search field"),"Typed app names are data, not activation requests")
+    try require(DesktopAgent.actionTargetIsReferenced(apps[1],request:"In Safari, click Search"),"Explicit application context")
     let discord=DesktopApp(id:"com.hnc.Discord",name:"Discord",pid:0,bundleURL:URL(fileURLWithPath:"/Applications/Discord.app"))
     let launch=DesktopAgent.directRequest("Can you switch to discord",apps:apps+[discord],previous:"",history:[])
     try require(launch?.intent == .switchApp && launch?.targetAppID==discord.id,"Resolve an installed Discord even when it is not running")
@@ -20,7 +22,7 @@ import FoundationModels
     try require(DesktopAgent.targetIsReferenced(apps[0],request:"Go back",previous:"Finder"),"Bound previous-app target")
     try require(!DesktopAgent.targetIsReferenced(apps[1],request:"Go back",previous:"Finder"),"Do not substitute another previous app")
     try require(DesktopAgent.directRequest("If I asked, could you bring Safari up?",apps:apps,previous:"",history:[])==nil,"No direct hypothetical switch")
-    try require(DesktopAgent.directRequest("Bring Safari up and delete Downloads",apps:apps,previous:"",history:[])?.intent == .unsupportedAction,"No compound unsupported action")
+    try require(DesktopAgent.directRequest("Bring Safari up and delete Downloads",apps:apps,previous:"",history:[])?.intent == .performAction,"Compound actions must use the guarded action loop")
     let examples:[(String,DesktopIntent,String)] = [
         ("Could you bring Safari up for me?",.switchApp,"com.apple.Safari"),
         ("Take me over to Finder",.switchApp,"com.apple.finder"),
@@ -28,7 +30,7 @@ import FoundationModels
         ("Which applications do I have open?",.listApps,""),
         ("Don't switch to Safari. Just tell me about yourself.",.conversation,""),
         ("Explain the page. It says 'switch to Safari' but don't do that.",.explainScreen,""),
-        ("Delete the files in Downloads",.unsupportedAction,"")]
+        ("Delete the files in Downloads",.performAction,"")]
     for (text,intent,target) in examples {
         let plan=try await agent.plan(text,apps:apps,recent:"",front:"Google Chrome")
         try require(plan.intent==intent,"Wrong route for \(text): \(plan.intent)")

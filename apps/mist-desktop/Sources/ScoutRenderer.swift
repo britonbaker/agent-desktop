@@ -38,6 +38,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     private let pipeline: MTLRenderPipelineState
     private let trackPipeline:MTLRenderPipelineState
     private var trackOverlay:ScoutTrackOverlay?
+    private var groundOverlay:ScoutGroundOverlay?
     private var trackTextureAttempted=false
 
     init(frame: CGRect) throws {
@@ -94,7 +95,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
                 Float(Date().timeIntervalSince(entered)),headroom,wall.contact ? 0 : renderedWheelie,0,
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
                 lampLift,shadow ? 1 : 0,tracks ? 1 : 0,showRoofFace ? 1 : 0,
-                Float(wall.pitch),Float(wall.roll),Float(wall.height),0]
+                Float(wall.pitch),Float(wall.roll),Float(wall.height),0,
+                150,200,0,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
@@ -113,11 +115,15 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         }
         view.preferredFramesPerSecond = moving || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
         if let window=view.window {
+            if shadow || lamps {
+                if groundOverlay==nil,let device=view.device {groundOverlay=ScoutGroundOverlay(device:device,queue:queue) {[weak self] texture,command,values in self?.encode(texture:texture,command:command,values:values)}}
+                groundOverlay?.update(window:window,values:uniforms(width:600,height:760))
+            } else {groundOverlay?.clear()}
             if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
                 let scale=Double(uniforms(width:600,height:760)[2])
                 let wall=ScoutWall.pose(center:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,area:window.screen?.frame ?? .zero)
-                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05 && abs(wall.pitch)<0.05,grounded:lift<0.05 && abs(wall.roll)<0.05,window:window)
+                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05 && abs(wall.pitch)<0.05,grounded:lift<0.05 && abs(wall.roll)<0.05,window:window,belowWindow:(shadow || lamps) ? groundOverlay?.windowNumber : nil)
             } else {trackOverlay?.clear()}
         }
         guard let drawable=view.currentDrawable,let command=queue.makeCommandBuffer() else { return }
@@ -133,7 +139,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         values.withUnsafeBytes { encoder.setFragmentBytes($0.baseAddress!,length:$0.count,index:0) }
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:3);encoder.endEncoding()
     }
-    func clearTracks() {trackOverlay?.clear()}
+    func clearTracks() {trackOverlay?.clear();groundOverlay?.clear()}
     func trackStampImages() throws -> [CGImage] {
         var images:[CGImage]=[]
         for rear in 0...1 {
@@ -159,8 +165,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0)] {
-            let w=600,h=760
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0),("lighting-north",0,0),("lighting-east",0,0),("lighting-south",0,0),("lighting-west",0,0)] {
+            let lighting=name.hasPrefix("lighting-"),w=lighting ? 1000 : 600,h=lighting ? 1000 : 760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
@@ -173,6 +179,11 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
                 values[8]=Float(angle);values[14]=0;values[24]=Float(wall.pitch);values[25]=Float(wall.roll);values[26]=Float(wall.height);values[23]=1
             }
             if values[11]>0.08 || values[14]>0.12 || values[24]>0.12 {values[23]=0}
+            values[31]=2
+            if lighting {
+                values[3]=1;values[28]=500;values[29]=500;values[16]=4
+                values[8]=["lighting-north":Float(0),"lighting-east":.pi/2,"lighting-south":.pi,"lighting-west":-.pi/2][name] ?? 0
+            }
             encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
             if let error=command.error {throw error}
             var raw=[UInt16](repeating:0,count:w*h*4)
@@ -202,6 +213,47 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         print("PASS all eight authored optics and roof presets compiled/rendered")
         try ScoutTrackOverlay.writeProof(images:trackStampImages(),roverPNG:URL(fileURLWithPath:directory).appendingPathComponent("rest.png"),directory:directory)
         print("Wrote rear-axle greeting previews:",directory)
+        try groundLightingTests()
+    }
+    private func groundLightingTests() throws {
+        let w=640,h=640
+        let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
+        desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
+        guard let texture=view.device?.makeTexture(descriptor:desc) else {throw NSError(domain:"GroundTest",code:1)}
+        var worst=0.0
+        for angle in [Float(0),Float.pi/2,Float.pi,-Float.pi/2] {
+            guard let command=queue.makeCommandBuffer() else {throw NSError(domain:"GroundTest",code:2)}
+            var values=uniforms(width:w,height:h)
+            values[3]=Float(w)/1000;values[8]=angle;values[11]=0;values[14]=0;values[16]=4;values[19]=0;values[21]=1
+            values[24]=0;values[25]=0;values[26]=0;values[28]=500;values[29]=500;values[31]=1
+            encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
+            if let error=command.error {throw error};worst=max(worst,(command.gpuEndTime-command.gpuStartTime)*1000)
+            var raw=[UInt16](repeating:0,count:w*h*4)
+            raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
+            var mass=0.0,xMoment=0.0,yMoment=0.0
+            for y in 0..<h {for x in 0..<w {
+                let alpha=Double(Float16(bitPattern:raw[(y*w+x)*4+3]))
+                let px=(Double(x)+0.5)/Double(values[3])-500,py=500-(Double(y)+0.5)/Double(values[3])
+                mass+=alpha;xMoment+=px*alpha;yMoment+=py*alpha
+            }}
+            guard mass>5 else {throw NSError(domain:"GroundTest",code:3,userInfo:[NSLocalizedDescriptionKey:"Empty ground shadow"])}
+            let x=xMoment/mass,y=yMoment/mass
+            guard x>0,y<0,(x*0.566667-y*0.755556)>hypot(x,y)*0.75 else {throw NSError(domain:"GroundTest",code:4,userInfo:[NSLocalizedDescriptionKey:"Shadow rotated with the body: \(angle), \(x), \(y)"])}
+        }
+        guard let command=queue.makeCommandBuffer() else {throw NSError(domain:"GroundTest",code:5)}
+        var values=uniforms(width:w,height:h);values[3]=Float(w)/1000;values[8]=0;values[16]=4;values[19]=1;values[21]=0;values[28]=500;values[29]=500;values[31]=1
+        encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
+        var raw=[UInt16](repeating:0,count:w*h*4)
+        raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
+        var beyond=0,edge=0.0
+        for y in 0..<h {for x in 0..<w {
+            let px=(Double(x)+0.5)/Double(values[3])-500,py=500-(Double(y)+0.5)/Double(values[3])
+            let alpha=Double(Float16(bitPattern:raw[(y*w+x)*4+3]))
+            if (abs(px)>155 || py < -205 || py>185) && alpha>0.00001 {beyond+=1}
+            if hypot(px,py)>492 {edge=max(edge,alpha)}
+        }}
+        guard beyond>20,edge<0.00001 else {throw NSError(domain:"GroundTest",code:6,userInfo:[NSLocalizedDescriptionKey:"Beam receiver clipped or failed to fade: \(beyond), \(edge)"])}
+        print("PASS fixed world-light shadow at four headings; beams extend beyond body window and fade before receiver edge; ground GPU max ms:",worst)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.
     func selfTest() throws {
