@@ -14,6 +14,8 @@ import FoundationModels
     try require(!DesktopAgent.targetIsReferenced(apps[0],request:"Please switch to FaceTime"),"A wrong model ID cannot redirect an unmatched target")
     try require(DesktopAgent.targetIsReferenced(apps[0],request:"Go back",previous:"Finder"),"Bound previous-app target")
     try require(!DesktopAgent.targetIsReferenced(apps[1],request:"Go back",previous:"Finder"),"Do not substitute another previous app")
+    try require(DesktopAgent.directRequest("If I asked, could you bring Safari up?",apps:apps,previous:"",history:[])==nil,"No direct hypothetical switch")
+    try require(DesktopAgent.directRequest("Bring Safari up and delete Downloads",apps:apps,previous:"",history:[])?.intent == .unsupportedAction,"No compound unsupported action")
     let examples:[(String,DesktopIntent,String)] = [
         ("Could you bring Safari up for me?",.switchApp,"com.apple.Safari"),
         ("Take me over to Finder",.switchApp,"com.apple.finder"),
@@ -32,6 +34,14 @@ import FoundationModels
     try require(back.intent == .switchApp && back.targetAppID == "com.google.Chrome","Previous app resolution")
     let compound=try await agent.plan("Bring Safari up and explain what is on its page",apps:apps,recent:"",front:"Finder")
     try require(compound.intent == .switchApp && compound.targetAppID == "com.apple.Safari" && compound.explainAfterSwitch,"Switch then explain: \(compound.intent), \(compound.targetAppID), \(compound.explainAfterSwitch)")
+    let visits=[AppVisit(id:"com.google.Chrome",name:"Google Chrome",time:3),AppVisit(id:"com.apple.finder",name:"Finder",time:2),AppVisit(id:"com.apple.Safari",name:"Safari",time:1)]
+    for (text,offset,id) in [("Switch to the app we were just using",1,"com.google.Chrome"),("Take me to three apps ago",3,"com.apple.Safari"),("Go back three apps and explain the page",3,"com.apple.Safari")] {
+        let result=try await agent.plan(text,apps:apps,recent:"",front:"Finder",history:visits)
+        try require(result.intent == .switchApp && result.historyOffset==offset && result.targetAppID==id,"App history route: \(text) -> \(result.historyOffset), \(result.targetAppID)")
+        print("PASS app-history route:",text,"->",result.targetAppID)
+    }
+    let notSwitch=try await agent.plan("Don't switch to the app from three apps ago. Just tell me which one it was.",apps:apps,recent:"",front:"Finder",history:visits)
+    try require(notSwitch.intent != .switchApp,"History question/negation must not authorize a switch")
     let excerpt="""
     webarea: Companion Casting Room
     heading: Scout, a survey rover

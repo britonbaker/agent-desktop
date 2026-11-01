@@ -8,6 +8,10 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if let index=CommandLine.arguments.firstIndex(of:"--voice-audition"),CommandLine.arguments.count>index+1 {
+            Task {do {try await writeVoiceAudition(to:CommandLine.arguments[index+1]);exit(0)} catch {print("Voice audition failed:",error);exit(1)}}
+            RunLoop.main.run();return
+        }
         if CommandLine.arguments.contains("--vision-front-test") {
             setbuf(stdout,nil)
             Task { @MainActor in
@@ -118,6 +122,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var permissionsPending = false
     private var conversationActive = false
     private var previousExternalApp = ""
+    private var appTimeline=AppTimeline.load()
     private var tossTimer: Timer?
     private var driveTimer: Timer?
     private var ambientTimer: Timer?
@@ -161,10 +166,9 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         setupMenu()
         Task { _ = try? await PhononModel.shared.get() }
         if VisionConfiguration.installed {Task {try? await LocalVision.shared.prepare()}}
-        appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
-            if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier { if let self,let name=app.localizedName,name != self.lastExternalApp {
-                    self.previousExternalApp=self.lastExternalApp;self.lastExternalApp=name;self.lastExternalPID=app.processIdentifier
-                } }
+        if let front=NSWorkspace.shared.frontmostApplication {rememberApp(front)}
+        appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification,object:nil,queue:.main) { [weak self] note in
+            if let app=note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication {self?.rememberApp(app)}
         }
         let config = WKWebViewConfiguration()
         config.userContentController.add(self, name: "mist")
@@ -206,6 +210,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         globalShiftMonitor=NSEvent.addGlobalMonitorForEvents(matching:[.keyDown,.flagsChanged]) { [weak self] event in self?.keyboardActivation(event) }
         enableTaps()
         ambientTimer=Timer.scheduledTimer(withTimeInterval:0.1,repeats:true) { [weak self] _ in self?.ambientTick() }
+    }
+    private func rememberApp(_ app:NSRunningApplication) {
+        guard app.activationPolicy == .regular,let id=app.bundleIdentifier,id != Bundle.main.bundleIdentifier,let name=app.localizedName else {return}
+        if appTimeline.visits.last?.id != id {previousExternalApp=appTimeline.visits.last?.name ?? "";appTimeline.record(id:id,name:name);appTimeline.save()}
+        lastExternalApp=name;lastExternalPID=app.processIdentifier
     }
     private func setupMenu() {
         let menu = NSMenu()
@@ -428,10 +437,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         guard SystemLanguageModel.default.isAvailable else { update("error", "Apple’s local model is unavailable. Nothing was sent online."); return }
         let active=NSWorkspace.shared.frontmostApplication
         let front=active?.bundleIdentifier == Bundle.main.bundleIdentifier ? FrontWindow.underlyingApp() : active
-        if let front,front.bundleIdentifier != Bundle.main.bundleIdentifier {
-            if front.localizedName != lastExternalApp {previousExternalApp=lastExternalApp}
-            lastExternalApp=front.localizedName ?? lastExternalApp;lastExternalPID=front.processIdentifier
-        }
+        if let front {rememberApp(front)}
+        let history=appTimeline.previous
         let currentApp = lastExternalApp,currentPID=lastExternalPID
         let previousApp=previousExternalApp
         responseTask = Task { @MainActor [weak self] in
@@ -440,7 +447,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 guard let self,self.generation==ticket else {return};self.update("thinking",message)
             }
             do {
-                let answer=try await self.desktopAgent.answer(text,front:currentApp,recent:self.recentTurns,previous:previousApp,frontPID:currentPID,authorized:{[weak self] in self?.generation==ticket})
+                let answer=try await self.desktopAgent.answer(text,front:currentApp,recent:self.recentTurns,previous:previousApp,frontPID:currentPID,history:history,authorized:{[weak self] in self?.generation==ticket})
                 guard !Task.isCancelled,self.generation==ticket else {return}
                 self.reply=answer
                 self.recentTurns=String((self.recentTurns+"\nUser: "+text+"\nRove: "+answer).suffix(1400))
