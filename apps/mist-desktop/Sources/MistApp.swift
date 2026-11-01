@@ -3,6 +3,7 @@ import WebKit
 import Speech
 import AVFoundation
 import FoundationModels
+import ApplicationServices
 
 @main
 struct RoveMain {
@@ -138,6 +139,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var monitor: Any?
     private var globalShiftMonitor:Any?
     private var doubleShift=DoubleShift()
+    private var inputEvents=0
+    private var shiftEvents=0
+    private var shiftActivations=0
+    private var shiftTrace:[String]=[]
     private var tapPeaks:[String]=[]
     private var lastMotionSample=0.0
     private var acceptedKnocks=0
@@ -342,17 +347,21 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         toggle();if conversationActive {greetScout()}
     }
     private func keyboardActivation(_ event:NSEvent) {
+        inputEvents+=1
         if event.type == .keyDown {doubleShift.typed(at:event.timestamp);return}
         guard event.keyCode==56 || event.keyCode==60 else {
             doubleShift.typed(at:event.timestamp);return
         }
+        shiftEvents+=1
+        let held=event.modifierFlags.contains(.shift)
+        shiftTrace.append(String(format:"%.3f %@",event.timestamp,held ? "down" : "up"));shiftTrace=Array(shiftTrace.suffix(12))
         let other = !event.modifierFlags.intersection([.command,.control,.option]).isEmpty
-        if doubleShift.changed(at:event.timestamp,held:event.modifierFlags.contains(.shift),otherModifier:other) {activateCompanion()}
+        if doubleShift.changed(at:event.timestamp,held:held,otherModifier:other) {shiftActivations+=1;activateCompanion()}
     }
     @objc private func knockDiagnostics() {
         let age=lastMotionSample>0 ? String(format:"%.1f",ProcessInfo.processInfo.systemUptime-lastMotionSample) : "no"
         let alert=NSAlert();alert.messageText="Rove knock diagnostics"
-        alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
+        alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nAccessibility trusted: \(AXIsProcessTrusted())\nShift events: \(shiftEvents); accepted gestures: \(shiftActivations)\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
         alert.addButton(withTitle:"Done");alert.runModal()
     }
     @objc private func explainWindow() { respond("Explain the page or window I am looking at. Start with its main content and what I can do next.") }

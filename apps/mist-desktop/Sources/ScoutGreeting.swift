@@ -1,6 +1,6 @@
 import Foundation
 
-/// Drive to a side bezel and park on all four wheels while listening.
+/// Reach a side bezel before lifting the front wheels against it.
 struct ScoutGreeting {
     let origin:CGPoint
     let destination:CGPoint
@@ -9,7 +9,7 @@ struct ScoutGreeting {
     var heading:Double {destination.x<origin.x ? -.pi/2 : .pi/2}
     var travel:Double {hypot(destination.x-origin.x,destination.y-origin.y)}
     var approach:Double {max(0.55,travel/480)}
-    var duration:Double {0.3+approach+0.15}
+    var duration:Double {0.3+approach+2.5}
     static func smooth(_ value:Double) -> Double {
         let t=min(1,max(0,value));return t*t*(3-2*t)
     }
@@ -25,7 +25,11 @@ struct ScoutGreeting {
         var turn=heading-initialHeading
         while turn > .pi {turn-=2 * .pi}
         while turn < -.pi {turn+=2 * .pi}
-        let position=CGPoint(x:origin.x+(destination.x-origin.x)*roll,y:origin.y)
-        return (position,initialHeading+turn*Self.smooth(time/0.3),0,travel*roll,time>0.3 && contact<0)
+        let direction=heading<0 ? -1.0 : 1.0
+        let pitch=0.62*Self.smooth(contact/0.42)*(1-Self.smooth((contact-1.45)/0.6))
+        let push=(1-cos(pitch))*0.862*pointsPerUnit
+        let retreat=16*Self.smooth((contact-2.05)/0.45)
+        let position=CGPoint(x:origin.x+(destination.x-origin.x)*roll+direction*(push-retreat),y:origin.y)
+        return (position,initialHeading+turn*Self.smooth(time/0.3),pitch,travel*roll+min(2,max(0,contact))*7-retreat,(time>0.3 && contact<0) || retreat>0 && retreat<16)
     }
 }
