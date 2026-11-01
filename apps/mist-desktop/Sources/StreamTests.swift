@@ -4,6 +4,8 @@ import PhononTTS
 func runStreamTests() async throws {
     let loading = Date()
     let model = try await PhononModel.shared.get()
+    precondition(model.voice==RoveSpeechVoice.selected && RoveSpeechVoice.available.contains(model.voice))
+    print("PASS explicit bundled US English voice:",model.voice)
     print(String(format: "Local model ready in %.3fs", Date().timeIntervalSince(loading)))
     let text = "You are in Finder. I can help you explore your computer without looking at the screen. You can interrupt me whenever you need to change direction."
     let start = Date(); var first = 0.0; var chunks = 0; var samples = 0

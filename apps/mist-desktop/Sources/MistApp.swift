@@ -8,6 +8,10 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if let index=CommandLine.arguments.firstIndex(of:"--character-voice-previews"),CommandLine.arguments.count>index+1 {
+            Task {do {try await writeCharacterVoicePreviews(directory:CommandLine.arguments[index+1]);exit(0)} catch {print("Voice previews failed:",error);exit(1)}}
+            RunLoop.main.run();return
+        }
         if let index=CommandLine.arguments.firstIndex(of:"--app-destination-test"),CommandLine.arguments.count>index+1 {
             let id=CommandLine.arguments[index+1]
             if let app=DesktopAgent.runningApps().first(where:{$0.id==id}),let target=DockDestination.anchor(for:app) {print("Destination:",app.name,target.source,target.point);exit(0)}
@@ -119,6 +123,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var detector = TapDetector()
     private var generation = 0
     private var responseTask: Task<Void, Never>?
+    private let robotSounds=RobotSounds()
+    private var cueTask:Task<Void,Never>?
     private var state = "idle"
     private var reply = ""
     private var lastRequest = ""
@@ -228,6 +234,17 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for (title, action, key) in [("Summon / listen · double Shift", #selector(activateCompanion), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
+        let voices=NSMenuItem(title:"Speaking voice · US English",action:nil,keyEquivalent:"")
+        let voiceMenu=NSMenu()
+        for name in RoveSpeechVoice.available {
+            let item=NSMenuItem(title:name,action:#selector(chooseSpeechVoice(_:)),keyEquivalent:"")
+            item.target=self;item.representedObject=name;item.state=name==RoveSpeechVoice.selected ? .on : .off;voiceMenu.addItem(item)
+        }
+        voices.submenu=voiceMenu;menu.addItem(voices)
+        let sounds=NSMenuItem(title:"Robot tap sounds",action:#selector(toggleRobotSounds(_:)),keyEquivalent:"")
+        sounds.target=self;sounds.state=RobotSounds.enabled ? .on : .off;menu.addItem(sounds)
+        let preview=NSMenuItem(title:"Preview robot tap sound",action:#selector(previewRobotSound),keyEquivalent:"")
+        preview.target=self;menu.addItem(preview)
         for (title,action) in [("Knock diagnostics…",#selector(knockDiagnostics)),("Preview Scout’s edge greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
             let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
@@ -366,6 +383,17 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         beginConversation(preserveGreeting:keepGreeting)
         if conversationActive && !keepGreeting {greetScout()}
     }
+    @objc private func chooseSpeechVoice(_ item:NSMenuItem) {
+        guard let name=item.representedObject as? String,RoveSpeechVoice.available.contains(name) else {return}
+        stop();UserDefaults.standard.set(name,forKey:"roveSpeechVoice")
+        for other in item.menu?.items ?? [] {other.state=other===item ? .on : .off}
+    }
+    @objc private func toggleRobotSounds(_ item:NSMenuItem) {
+        let enabled = !RobotSounds.enabled
+        UserDefaults.standard.set(enabled,forKey:"roveRobotSounds");item.state=enabled ? .on : .off
+        if !enabled {robotSounds.stop()}
+    }
+    @objc private func previewRobotSound() {stop();robotSounds.play()}
     private func keyboardActivation(_ event:NSEvent) {
         inputEvents+=1
         if event.type == .keyDown {doubleShift.typed(at:event.timestamp);return}
@@ -395,6 +423,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func quit() { NSApplication.shared.terminate(nil) }
     @objc private func stop() {endConversation()}
     private func endConversation(preserveGreeting:Bool=false) {
+        cueTask?.cancel();cueTask=nil;robotSounds.stop()
         conversationActive=false
         generation += 1; responseTask?.cancel(); responseTask = nil
         if !preserveGreeting {
@@ -421,7 +450,13 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                     self.permissionsPending = false
                     guard self.generation == permissionTicket else { return }
                     guard authorization == .authorized, granted else { self.update("error", "Allow microphone and speech recognition in System Settings to talk to Rove."); return }
-                    self.startListening()
+                    self.update("thinking","Getting ready to listen…")
+                    let duration=self.robotSounds.play()
+                    self.cueTask=Task { @MainActor [weak self] in
+                        if duration>0 {try? await Task.sleep(for:.seconds(duration+0.04))}
+                        guard let self,!Task.isCancelled,self.generation==permissionTicket,self.conversationActive else {return}
+                        self.cueTask=nil;self.startListening()
+                    }
                 }
             }
         }
@@ -431,7 +466,6 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         do {
             try audio.start()
             update("listening", "Listening…")
-            NSSound(named: "Pop")?.play()
             idleTimer = Timer.scheduledTimer(withTimeInterval: 35, repeats: false) { [weak self] _ in self?.stop() }
         } catch { update("error", error.localizedDescription) }
     }
