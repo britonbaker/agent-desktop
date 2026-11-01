@@ -270,7 +270,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         wanderMenuItem?.isEnabled = id == "scout"
         nextWander=Date().addingTimeInterval(6)
         ready = false
-        scout?.view.isPaused=true;scout?.view.removeFromSuperview();scout=nil;lidMenuItem?.state = .off
+        scout?.clearTracks();scout?.view.isPaused=true;scout?.view.removeFromSuperview();scout=nil;lidMenuItem?.state = .off
         handheld?.view.isPaused = true; handheld?.view.removeFromSuperview(); handheld = nil
         if id == "scout", let host=panel.contentView {
             do { let renderer=try ScoutRenderer(frame:host.bounds);host.addSubview(renderer.view,positioned:.below,relativeTo:web);scout=renderer
@@ -623,7 +623,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         decisionHandler(navigationAction.request.url?.isFileURL == true ? .allow : .cancel)
     }
     func applicationWillTerminate(_ notification: Notification) {
-        stop(); motion.stop(); tossTimer?.invalidate(); ambientTimer?.invalidate(); parkRover()
+        scout?.clearTracks();stop(); motion.stop(); tossTimer?.invalidate(); ambientTimer?.invalidate(); parkRover()
         Task {await LocalVision.shared.stop()}
         if let monitor { NSEvent.removeMonitor(monitor) }
         if let globalShiftMonitor {NSEvent.removeMonitor(globalShiftMonitor)}

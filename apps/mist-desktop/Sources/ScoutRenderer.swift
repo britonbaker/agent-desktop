@@ -6,8 +6,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     let view: MTKView
     var state = "idle" { didSet { if oldValue != state { entered = Date() } } }
     var heading: Float = 0
-    var distance: Float = 0 {didSet {if abs(distance-oldValue)>0.001 {lastMoved=Date()}}}
-    private var lastMoved=Date.distantPast
+    var distance: Float = 0
     var optics=UserDefaults.standard.object(forKey:"scoutOptics") as? Int ?? 4
     var paint=UserDefaults.standard.integer(forKey:"scoutPaint")
     var face=UserDefaults.standard.integer(forKey:"scoutFace")
@@ -36,6 +35,9 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     private let started = Date()
     private let queue: MTLCommandQueue
     private let pipeline: MTLRenderPipelineState
+    private let trackPipeline:MTLRenderPipelineState
+    private var trackOverlay:ScoutTrackOverlay?
+    private var trackTextureAttempted=false
 
     init(frame: CGRect) throws {
         guard let device=MTLCreateSystemDefaultDevice(), let queue=device.makeCommandQueue(),
@@ -47,6 +49,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         descriptor.fragmentFunction=lib.makeFunction(name:"main0")
         descriptor.colorAttachments[0].pixelFormat = .rgba16Float
         pipeline=try device.makeRenderPipelineState(descriptor:descriptor)
+        descriptor.fragmentFunction=lib.makeFunction(name:"scout_track_stamp")
+        trackPipeline=try device.makeRenderPipelineState(descriptor:descriptor)
         view=MTKView(frame:frame,device:device)
         super.init()
         view.colorPixelFormat = .rgba16Float
@@ -85,7 +89,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
                 heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
                 Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0,
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
-                lampLift,shadow ? 1 : 0,tracks ? Float(Date().timeIntervalSince(lastMoved)<1.25 ? exp(-max(0,Date().timeIntervalSince(lastMoved))/0.28) : 0) : 0,0]
+                lampLift,shadow ? 1 : 0,tracks ? 1 : 0,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
@@ -103,6 +107,13 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             lift += liftVelocity*dt;lift=max(0,min(1,lift))
         }
         view.preferredFramesPerSecond = moving || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
+        if let window=view.window {
+            if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
+                if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
+                let scale=Double(uniforms(width:600,height:760)[2])
+                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05,grounded:lift<0.05,window:window)
+            } else {trackOverlay?.clear()}
+        }
         guard let drawable=view.currentDrawable,let command=queue.makeCommandBuffer() else { return }
         encode(texture:drawable.texture,command:command,values:uniforms(width:drawable.texture.width,height:drawable.texture.height))
         command.present(drawable);command.commit()
@@ -116,17 +127,39 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         values.withUnsafeBytes { encoder.setFragmentBytes($0.baseAddress!,length:$0.count,index:0) }
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:3);encoder.endEncoding()
     }
+    func clearTracks() {trackOverlay?.clear()}
+    func trackStampImages() throws -> [CGImage] {
+        var images:[CGImage]=[]
+        for rear in 0...1 {
+            let w=128,h=32
+            let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
+            desc.usage=[.renderTarget];desc.storageMode = .shared
+            guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"TrackStamp",code:1)}
+            let pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=texture;pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
+            guard let encoder=command.makeRenderCommandEncoder(descriptor:pass) else {throw NSError(domain:"TrackStamp",code:2)}
+            encoder.setRenderPipelineState(trackPipeline)
+            var tile=SIMD4<Float>(Float(w),Float(h),Float(rear),0)
+            encoder.setFragmentBytes(&tile,length:16,index:1);encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:3);encoder.endEncoding()
+            command.commit();command.waitUntilCompleted();if let error=command.error {throw error}
+            var raw=[UInt16](repeating:0,count:w*h*4)
+            raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
+            let bytes=raw.map {UInt8(max(0,min(255,Float(Float16(bitPattern:$0))*255)))}
+            guard let provider=CGDataProvider(data:Data(bytes) as CFData),let space=CGColorSpace(name:CGColorSpace.linearSRGB),
+                  let image=CGImage(width:w,height:h,bitsPerComponent:8,bitsPerPixel:32,bytesPerRow:w*4,space:space,bitmapInfo:CGBitmapInfo(rawValue:CGImageAlphaInfo.premultipliedLast.rawValue),provider:provider,decode:nil,shouldInterpolate:true,intent:.defaultIntent) else {throw NSError(domain:"TrackStamp",code:3)}
+            images.append(image)
+        }
+        return images
+    }
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("tracks",0,150)] {
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20)] {
             let w=600,h=760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
             if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
-            if name=="tracks" {values[10]=7;values[22]=1;values[19]=0}
             encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
             if let error=command.error {throw error}
             var raw=[UInt16](repeating:0,count:w*h*4)
@@ -154,6 +187,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             if let error=command.error {throw error}
         }
         print("PASS all eight authored optics and roof presets compiled/rendered")
+        try ScoutTrackOverlay.writeProof(images:trackStampImages(),roverPNG:URL(fileURLWithPath:directory).appendingPathComponent("rest.png"),directory:directory)
         print("Wrote rear-axle greeting previews:",directory)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.
@@ -172,6 +206,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let bright=pixels.enumerated().filter { $0.offset%4 != 3 && Float(Float16(bitPattern:$0.element))>1 }.count
         let covered=stride(from:3,to:pixels.count,by:4).filter { Float(Float16(bitPattern:pixels[$0]))>0.9 }.count
         guard bright>0,covered>1000 else { throw NSError(domain:"ScoutTest",code:2,userInfo:[NSLocalizedDescriptionKey:"Empty or SDR render: covered=\(covered), HDR=\(bright)"]) }
+        let stamps=try trackStampImages();guard stamps.count==2 else {throw NSError(domain:"TrackStamp",code:4)}
+        print("PASS authored front/rear tread stamp textures")
         print("GPU render: \((command.gpuEndTime-command.gpuStartTime)*1000) ms")
         print("PASS native Scout: \(covered) solid pixels, \(bright) EDR channels above 1.0")
     }

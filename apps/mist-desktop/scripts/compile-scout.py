@@ -78,7 +78,7 @@ void main(){
  vec2 floorPoint=vec2(c*uv.x-s*uv.y,s*uv.x+c*uv.y);
  float detail=clamp(U.viewport.z/55.,.1,1.);
  float shade=.45*scoutCastOpacity(floorPoint)*(1.-.35*U.pose.w)*(floorPoint.y>0.?exp(-U.options.z*3.):1.);
- float dust=.83*scoutTreadCoverage(floorPoint,7.,max(1.,U.options.x),detail)*U.mechanics.z;
+ float dust=0.; // Fixed desktop tire marks are drawn in a separate receiver below this shadow.
  float floorAlpha=shade+(1.-shade)*dust;
  vec3 floorRGB=vec3(.003,.005,.008)*shade+vec3(.119,.113,.094)*dust*(1.-shade);
  // Each authored angular beam originates at its real lens, including hinge and chassis tilt.
@@ -106,6 +106,21 @@ with tempfile.TemporaryDirectory() as tmp:
  frag=pathlib.Path(tmp)/'scout.frag';spv=pathlib.Path(tmp)/'scout.spv';frag.write_text(header+body+extra+main)
  subprocess.run(['glslangValidator','-V',str(frag),'-o',str(spv)],check=True)
  metal=subprocess.check_output(['spirv-cross',str(spv),'--msl'],text=True)
+# SPIR-V strips the receiver helper once it is removed from Rove's body pass.
+# Reuse the scalar-only authored function verbatim for the cached contact texture.
+lug=re.search(r'float scoutTreadLug\(.*?\n}',original,re.S).group(0)
+metal+='\n'+lug+'\n'
+metal+=r"""
+fragment float4 scout_track_stamp(float4 position [[position]],constant float4& tile [[buffer(1)]]) {
+ float across=(position.x/tile.x-.5)*.306;
+ float behind=(position.y/tile.y-.5)*(6.2831853*.295/24.);
+ float roll=0.,rear=tile.z,detail=1.;
+ float ink=scoutTreadLug(across,behind,roll,rear,detail);
+ float shoulder=1.-smoothstep(.102,.148,abs(across));
+ float alpha=.30*ink*shoulder;
+ return float4(float3(.119,.113,.094)*alpha,alpha);
+}
+"""
 metal+='\nvertex float4 scout_vertex(uint id [[vertex_id]]) {return float4(id==1?3.:-1.,id==2?3.:-1.,0.,1.);}\n'
 (root/'Resources/scout.metal').write_text('// Authored Scout studio, adapted for native EDR. Regenerate with scripts/compile-scout.py.\n'+'\n'.join(x.rstrip() for x in metal.splitlines())+'\n')
 print('Compiled full Scout studio optics, roof kits and receiver effects')
