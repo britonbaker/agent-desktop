@@ -1,0 +1,13 @@
+{
+  "source": "https://companion-casting-room.britonbaker.chatgpt.site/downloads/companion-review.zip",
+  "retrieved": "2026-10-31",
+  "archive_sha256": "60bbe4d62b954aaa6fa11320678fbcaa30545b06e159be7bd53b8424e8a54274",
+  "body_sha256": "653e31cc245b18550019641e256bb4c28d08f39f99fa9e3f0b40ab0262a57aef",
+  "face_sha256": "751c085a84916156a715a618328c1e99030dac675cb6e0881554c229b3f0ffe2",
+  "adaptations": [
+    "Native display-plane camera and EDR output",
+    "Wheel rotation follows desktop travel distance",
+    "Rear-axle knock greeting",
+    "Original floor receiver replaced by native desktop contact shadow"
+  ]
+}

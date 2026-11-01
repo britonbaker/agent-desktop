@@ -32,7 +32,9 @@ struct RoveMain {
             print(ScreenImage.permitted ? "Screen capture permitted" : "Screen capture permission required");exit(0)
         }
         if CommandLine.arguments.contains("--scout-self-test") {
-            do { let renderer=try ScoutRenderer(frame:CGRect(x:0,y:0,width:300,height:380));try renderer.selfTest();exit(0) }
+            do { let renderer=try ScoutRenderer(frame:CGRect(x:0,y:0,width:300,height:380));try renderer.selfTest()
+                if let index=CommandLine.arguments.firstIndex(of:"--greeting-preview"),CommandLine.arguments.count>index+1 {try renderer.greetingPreview(directory:CommandLine.arguments[index+1])}
+                exit(0) }
             catch { print("FAIL: \(error)");exit(1) }
         }
         if let index=CommandLine.arguments.firstIndex(of:"--vision-image-test"),CommandLine.arguments.count>index+1 {
@@ -118,6 +120,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var tossTimer: Timer?
     private var driveTimer: Timer?
     private var ambientTimer: Timer?
+    private var greetingTimer:Timer?
     private var wanderHome=CGPoint.zero
     private var nextWander=Date.distantFuture
     private var isWandering=false
@@ -193,7 +196,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         for (title, action, key) in [("Talk / interrupt", #selector(toggle), "t"), ("Stop listening and speaking", #selector(stop), "."), ("Explain front window", #selector(explainWindow), "e"), ("Show last reply", #selector(showLastReply), "r"), ("Show Rove", #selector(show), ""), ("Quit Rove", #selector(quit), "q")] {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: key); item.target = self; menu.addItem(item)
         }
-        for (title,action) in [("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
+        for (title,action) in [("Preview Scout’s knock greeting",#selector(greetScout)),("Drive Scout in a small loop",#selector(driveScoutLoop)),("Park Scout",#selector(pauseWandering))] {
             let item = NSMenuItem(title:title,action:action,keyEquivalent:""); item.target = self; menu.addItem(item)
         }
         let wander=NSMenuItem(title:"Let Scout wander",action:#selector(toggleWandering(_:)),keyEquivalent:"")
@@ -282,6 +285,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if self.detector.update(time: time, strength: strength, keyboardAge: age) {
                 NSLog("Rove: double tap accepted")
                 self.toggle()
+                if self.conversationActive {self.greetScout()}
             }
         }
         do { try motion.start() } catch { update("error", error.localizedDescription) }
@@ -321,7 +325,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     private func startListening() {
-        parkRover()
+        if greetingTimer == nil {parkRover()}
         do {
             try audio.start()
             update("listening", "Listening…")
@@ -424,6 +428,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     @objc private func parkRover() {
+        greetingTimer?.invalidate();greetingTimer=nil;scout?.wheeliePitch=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
         rover.maximumSpeed=125;rover.acceleration=230
         driveTimer?.invalidate(); driveTimer = nil; driveRoute.removeAll(); rover.park()
@@ -466,6 +471,27 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         rover.position=panel.frame.origin;rover.target=destination
         rover.maximumSpeed=Double.random(in:20...30);rover.acceleration=45
         isWandering=true;startDriveTimer()
+    }
+    @objc private func greetScout() {
+        guard companionID == "scout",scout != nil,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {return}
+        parkRover();scout?.faceRequested=false
+        let start=panel.frame.origin
+        let motion=ScoutGreeting(origin:start,destination:bounded(CGPoint(x:start.x,y:start.y-28)),initialHeading:rover.heading)
+        let began=Date(),initialDistance=rover.distance
+        greetingTimer=Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
+            guard let self else {timer.invalidate();return}
+            if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {self.parkRover();return}
+            let age=Date().timeIntervalSince(began),pose=motion.pose(at:age)
+            self.rover.position=pose.position;self.rover.heading=pose.heading
+            self.rover.distance=initialDistance+pose.distance
+            self.rover.speed=age>0.22 && age<0.7 ? 60 : 0
+            self.panel.setFrameOrigin(pose.position);self.sendDrivePose()
+            self.scout?.wheeliePitch=Float(pose.pitch)
+            if age>=ScoutGreeting.duration {
+                timer.invalidate();self.greetingTimer=nil;self.rover.park();self.sendDrivePose()
+                self.wanderHome=pose.position;self.nextWander=Date().addingTimeInterval(7)
+            }
+        }
     }
     @objc private func driveScoutLoop() {
         guard companionID == "scout" else { return }

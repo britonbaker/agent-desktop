@@ -8,6 +8,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     var heading: Float = 0
     var distance: Float = 0
     var moving = false
+    var wheeliePitch:Float=0
     var faceRequested = false
     var viewingDistance: Double = 550
     private var lid: LidAngle?
@@ -18,6 +19,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         lid=enabled ? LidAngle() : nil;baselineAngle=lid?.read() == nil ? nil : 90;hingeDelta=0
         return baselineAngle != nil
     }
+    private var renderedWheelie:Float=0
+    private var wheelieVelocity:Float=0
     private var lift: Float = 0
     private var liftVelocity: Float = 0
     private var previous = Date()
@@ -71,19 +74,25 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
-                heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":4][state] ?? 0,lift,
-                Float(Date().timeIntervalSince(entered)),headroom,0,0]
+                heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
+                Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
         let now=Date(),dt=Float(min(0.05,now.timeIntervalSince(previous)));previous=now
+        let wheelieTarget=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? Float(0) : wheeliePitch
+        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {renderedWheelie=0;wheelieVelocity=0}
+        else {
+            wheelieVelocity+=((wheelieTarget-renderedWheelie)*100-wheelieVelocity*20)*dt
+            renderedWheelie=max(0,min(0.6,renderedWheelie+wheelieVelocity*dt))
+        }
         let target: Float = faceRequested && !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { lift=target;liftVelocity=0 }
         else {
             liftVelocity += ((target-lift)*64-liftVelocity*16)*dt
             lift += liftVelocity*dt;lift=max(0,min(1,lift))
         }
-        view.preferredFramesPerSecond = moving || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
+        view.preferredFramesPerSecond = moving || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
         guard let drawable=view.currentDrawable,let command=queue.makeCommandBuffer() else { return }
         encode(texture:drawable.texture,command:command,values:uniforms(width:drawable.texture.width,height:drawable.texture.height))
         command.present(drawable);command.commit()
@@ -96,6 +105,36 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         encoder.setRenderPipelineState(pipeline)
         values.withUnsafeBytes { encoder.setFragmentBytes($0.baseAddress!,length:$0.count,index:0) }
         encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:3);encoder.endEncoding()
+    }
+    func greetingPreview(directory:String) throws {
+        try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
+        var wheelFrames:[Data]=[]
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20)] {
+            let w=600,h=760
+            let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
+            desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
+            guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
+            var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
+            if name.hasPrefix("drive-") {values[10]=7}
+            encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
+            if let error=command.error {throw error}
+            var raw=[UInt16](repeating:0,count:w*h*4)
+            raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
+            guard let bitmap=NSBitmapImageRep(bitmapDataPlanes:nil,pixelsWide:w,pixelsHigh:h,bitsPerSample:8,samplesPerPixel:4,hasAlpha:true,isPlanar:false,colorSpaceName:.deviceRGB,bytesPerRow:w*4,bitsPerPixel:32),let output=bitmap.bitmapData else {throw NSError(domain:"ScoutPreview",code:2)}
+            for index in 0..<(w*h*4) {
+                let value=max(0,Float(Float16(bitPattern:raw[index])))
+                let alpha=min(1,max(0,Float(Float16(bitPattern:raw[(index/4)*4+3]))))
+                let encoded=index%4==3 ? alpha : alpha*pow(min(1,value/max(alpha,0.00001)),1/2.2)
+                output[index]=UInt8(min(255,max(0,encoded*255)))
+            }
+            guard let png=bitmap.representation(using:.png,properties:[:]) else {throw NSError(domain:"ScoutPreview",code:3)}
+            try png.write(to:URL(fileURLWithPath:directory).appendingPathComponent(name+".png"))
+            if name.hasPrefix("drive-") {wheelFrames.append(Data(bytes:output,count:w*h*4))}
+        }
+        let changed=zip(wheelFrames[0],wheelFrames[1]).filter {abs(Int($0.0)-Int($0.1))>8}.count
+        guard changed>100 else {throw NSError(domain:"ScoutPreview",code:4,userInfo:[NSLocalizedDescriptionKey:"Wheel travel did not change the render"])}
+        print("PASS authored wheel rotation:",changed,"channels changed from travel alone")
+        print("Wrote rear-axle greeting previews:",directory)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.
     func selfTest() throws {
