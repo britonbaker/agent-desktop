@@ -1,0 +1,2830 @@
+<!doctype html>
+<meta charset="utf-8" /><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'">
+<title>Rove — desktop drive</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --bg:#05070b; --panel:#0b1018; --line:#1a2130; --ink:#e6ecf6; --ink-2:#76859f;
+    --ok:#7ef0d0; --warn:#e0a45f; --bad:#d2706a; }
+  * { box-sizing:border-box; }
+  html,body { height:100%; margin:0; background:var(--bg); color:var(--ink);
+    font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace; overflow:hidden; }
+  body { display:grid; grid-template-rows:auto auto 1fr auto; }
+
+  header { display:flex; gap:10px; align-items:center; padding:12px 16px;
+    border-bottom:1px solid var(--line); }
+  .brand { letter-spacing:.14em; color:var(--ink-2); }
+  .sp { flex:1; }
+  button { background:var(--panel); border:1px solid var(--line); color:var(--ink-2);
+    padding:7px 12px; border-radius:7px; font:inherit; cursor:pointer; }
+  button:hover { color:var(--ink); }
+  button.on { color:#05070b; background:var(--ok); border-color:transparent; }
+
+  .perm { padding:8px 16px; border-bottom:1px solid var(--line); color:var(--ink-2); font-size:11.5px; }
+  .perm.bad { color:var(--warn); }
+  #mic { border-top:1px solid #10161f; font-variant-numeric:tabular-nums; }
+  #mic b { color:var(--ink); font-weight:400; }
+  #mic .lvl { color:var(--ok); }
+
+  .log { overflow:auto; padding:12px 16px; display:grid; gap:9px; align-content:start; }
+  .ev { border-left:2px solid var(--line); padding-left:10px; color:var(--ink-2); }
+  .ev.act { border-color:var(--ok); } .ev.ign { border-color:#232c3c; opacity:.6; }
+  .ev.ask { border-color:var(--warn); } .ev.err { border-color:var(--bad); color:var(--bad); }
+  .ev.ans { border-color:#3d7fd6; }
+  .ev .say { color:var(--ink); white-space:pre-wrap; margin-top:3px; }
+  .ev .src { font-size:10px; opacity:.55; margin-top:3px; }
+  .ev b { color:var(--ink); font-weight:400; }
+  .ev .n { font-variant-numeric:tabular-nums; font-size:11px; }
+  .ev .go { margin-top:5px; display:flex; gap:6px; }
+  .ev .go button { padding:3px 10px; font-size:11px; }
+
+  footer { padding:9px 16px; border-top:1px solid var(--line); color:#3c4a60;
+    display:flex; gap:12px; flex-wrap:wrap; }
+  .err { color:var(--bad); }
+
+  .fbody { position:relative; }
+  .float { position:fixed; right:16px; top:104px; z-index:50; width:180px; background:#04060a;
+    border:1px solid var(--line); border-radius:12px; overflow:hidden; user-select:none;
+    touch-action:none; box-shadow:0 10px 34px rgba(0,0,0,.6); }
+  .float .grip { display:flex; align-items:center; gap:6px; padding:5px 8px;
+    border-bottom:1px solid var(--line); cursor:grab; color:#3c4a60; font-size:10px;
+    letter-spacing:.12em; }
+  .float.dragging .grip { cursor:grabbing; }
+  .float .grip .s { flex:1; }
+  .float .grip button { padding:2px 7px; font-size:10px; }
+  .fbody { display:flex; flex-direction:column; min-height:0; }
+  #face { display:block; width:100%; height:206px; flex:1 1 auto; min-height:0; }
+  .saywrap { display:flex; align-items:center; }
+  #sayclose { display:none; }
+  #say { flex:0 0 auto; width:100%; background:#090f18; border:0;
+    border-top:1px solid #141b27; color:var(--ink); padding:10px 13px; border-radius:0;
+    font:500 14px/1.3 ui-rounded, "SF Pro Rounded", system-ui, -apple-system, sans-serif;
+    letter-spacing:-.005em; transition:background .15s; }
+  #say::placeholder { color:#4a5a73; font-weight:450; }
+  #say:focus { outline:none; background:#0d1520; }
+  body.pip-host .float { display:none; }
+  /* In the desktop app the window IS the face: the console chrome goes away and the
+     panel fills it. Same page either way, no second copy to keep in sync.
+     This block is last on purpose — at equal specificity CSS takes the later rule, and
+     sitting above .float meant none of these overrides actually applied. */
+  /* This is the app's layout, not a narrow-screen layout, and the difference
+     mattered the moment his window could be dragged: as a breakpoint it turned him
+     into the development page mid-drag at 520 points. The class is set from the one
+     thing that actually decides it — whether there is a Tauri to be running in —
+     and falls back to the width in a browser, where the width is all there is. */
+  html.app {
+    /* He is one design at one size, scaled — not a layout that reflows. His panel
+       was already a fraction of the window (100vw * 1.10); --s says the same thing
+       for everything that was written in points back when the window was always 202
+       of them. Drag him wider and the buttons, the text and the corner radius grow
+       with his face instead of staying behind as a row of specks.
+
+       --s is a length — one design point — so the multipliers are bare numbers, not
+       pixels. `44px * var(--s)` is a length times a length, which is not a thing,
+       and every rule written that way silently collapsed to zero. */
+    /* One panel's width. The window is two of them when a card is open beside
+       him, and every measurement below is his panel's, not the window's. */
+    --pw: 100vw;
+    --s: calc(var(--pw) / 202);
+
+    /* The material everything he says is made of.
+       Three layers, because one translucent fill is a translucent fill and not
+       glass: a fill that is lighter at the top than the bottom, a half-pixel of
+       white along the top edge where a pane would catch the light, and a shadow
+       underneath so it sits above the thing it covers rather than in it.
+       No backdrop-filter, and not for want of trying. It cannot reach his face —
+       that is the Metal layer, underneath the whole webview — and over the
+       transparent parts of the window it draws a second rounded rectangle just
+       inside the first: WebKit clips the filtered backdrop to its own rounded rect
+       and composites it separately, and the seam shows. Something that has nothing
+       to blur and leaves a ring behind is all cost. The fill carries the look. */
+    /* The band above him. He used to say things across his own face, which is
+       the one part of this that is supposed to be readable at a glance. */
+    /* Tall enough that a four-line answer still has air above it. A bubble that
+       fills its band to the edges is a header bar, whatever shape it is. */
+    --head: calc(var(--pw) * 0.55);
+  /* Where the bar and the text field sit: under his panel by default, and on it
+     when he is two circles with a readout below. */
+  --bar: calc(var(--head) + var(--ph) + 10 * var(--s));
+    /* His panel's height. A rounded rectangle wants room for a whole face; two
+       circles want room for two eyes and the brows above them, and everything that
+       sits under him has to come up with it. */
+    --ph: calc(var(--pw) * 1.10);
+
+    --glass: linear-gradient(rgba(78,83,96,.80), rgba(30,33,42,.88));
+    --glass-edge: inset 0 calc(0.6 * var(--s)) 0 rgba(255,255,255,.22),
+                  inset 0 0 0 calc(0.6 * var(--s)) rgba(255,255,255,.075);
+    --glass-lift: 0 calc(2 * var(--s)) calc(12 * var(--s)) rgba(0,0,0,.42);
+
+    /* Everything above the Metal layer has to be genuinely see-through, not merely
+       dark. .float carried an opaque background and was covering the whole face. */
+    &, & body { background:transparent !important; }
+    .float { background:transparent !important; }
+    .fbody { background:transparent !important; }
+    body { display:flex; flex-direction:column; grid-template-rows:none; }
+    header, footer, .float .grip { display: none; }
+
+    /* The log was display:none here, which meant every answer he gave — every
+       forecast, every PR list, every "I don't have a tool for that" — was written
+       into a hidden element. The tools worked and were invisible, which is
+       indistinguishable from not working.
+
+       It is not the console list here though: one answer, over him, fading out. */
+    .log { display: block; position: static; padding: 0; gap: 0;
+      margin: calc(52 * var(--s)) calc(10 * var(--s)) 0;
+      overflow: hidden; flex: 0 1 auto; min-height: 0; z-index: 20; }
+    .log .ev { display: none; }
+    .log .ev:first-child { display: block; border: 0;
+      padding: calc(11 * var(--s)) calc(14 * var(--s));
+      border-radius: calc(18 * var(--s));
+      background: var(--glass);
+      box-shadow: var(--glass-lift), var(--glass-edge);
+      color: var(--ink); font-size: calc(11.5 * var(--s)); line-height: 1.45;
+      animation: pop .18s ease-out; }
+    .log .ev.ign:first-child { display: none; }   /* chatter stays silent */
+    .log .ev .n { display: none; }                /* diagnostics belong in the browser */
+    /* Scaled like everything else in here. Left out, it was the one line on him
+       still being drawn at its browser size, and it looked like a mistake. */
+    .log .ev .src { font-size: calc(9.5 * var(--s)); }
+    .log .ev .say { font-size: calc(11.5 * var(--s)); }
+    .log .ev { cursor: default; }
+    .log .ev:first-child { cursor: pointer; }   /* click it to send it away */
+    /* He occupies the top of the window; the strip below him is transparent, so the
+       buttons read as floating under the panel rather than sitting on his chin. */
+    /* He is a square-ish panel at the top, and the rest of the window is empty
+       transparent space for anything that has something to say. Nothing is allowed
+       to cover his face — a message sitting on top of it hides the one part of this
+       that is supposed to be readable at a glance. */
+    /* Reserved rather than grown into on demand: the window is transparent up
+       here, so the room costs nothing but a resize on every sentence would be a
+       window jumping about while you read it. */
+    .think { flex:0 0 auto; height:var(--head); position:relative;
+      display:flex; align-items:flex-end; justify-content:center;
+      padding:calc(7 * var(--s)) calc(7 * var(--s)) calc(9 * var(--s));
+      pointer-events:none; }
+    /* No overflow:hidden — it clips the element's own pseudo-elements, and the
+       tail is two of those. Long answers are clamped by line instead. */
+    .think .bub { max-width:100%; pointer-events:auto; cursor:pointer;
+      display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:4;
+      padding:calc(9 * var(--s)) calc(12 * var(--s));
+      border-radius:calc(16 * var(--s));
+      /* Flat. The bubble and the text field are things to read, and a gradient
+         under a lit top edge is a surface competing with its own contents. The
+         grey is the buttons', so the three of them are one family. */
+      background:#2a2a2d;
+      color:var(--ink); font-size:calc(11.5 * var(--s)); line-height:1.4;
+      opacity:0; transform:translateY(calc(4 * var(--s))); transition:opacity .2s,
+      transform .2s; }
+    .think.on .bub { opacity:1; transform:none; }
+    .think .bub .src { display:block; margin-top:calc(3 * var(--s));
+      font-size:calc(9.5 * var(--s)); opacity:.55; }
+    /* The two dots are the whole reason it reads as a thought and not a banner.
+       They hang off the band rather than off the bubble, and at half a *panel*
+       rather than half the window — with a card open beside him the bubble is
+       centred over both of them, and a tail pointing at the gap between him and
+       his own weather report points at nobody. */
+    .think::after, .think::before { content:''; position:absolute; border-radius:50%;
+      left:calc(var(--pw) / 2); background:#2a2a2d;
+      opacity:0; transition:opacity .2s; }
+    .think::after { width:calc(6 * var(--s)); height:calc(6 * var(--s));
+      bottom:calc(3 * var(--s)); margin-left:calc(-11 * var(--s)); }
+    .think::before { width:calc(3.5 * var(--s)); height:calc(3.5 * var(--s));
+      bottom:calc(-2 * var(--s)); margin-left:calc(-3 * var(--s)); }
+    .think.on::after, .think.on::before { opacity:1; }
+    /* The console list is the browser's. Up here there is one thing at a time. */
+    .log { display:none !important; }
+
+    /* `right` as well as `left`. The base rule pins him 16px off the right edge
+       of the browser window, and a relatively positioned box with `right:16px`
+       shifts *left* by 16 — so his panel has been a sixteenth of a window left of
+       where it should be this whole time, which looked like a margin on one side
+       and nothing on the other. */
+    .float { position:relative !important; left:auto !important; right:auto !important;
+      top:auto !important;
+      width:var(--pw) !important; height:var(--ph); flex:0 0 auto;
+      border:0; border-radius:calc(30 * var(--s)); overflow:hidden; box-shadow:none; }
+    #face { border-radius:calc(30 * var(--s)); height:100%; }
+    /* He is a thing you pick up and put somewhere, so he says so on approach.
+       :active is the whole window's, which is close enough: there is nothing else
+       in here to press. */
+    .fbody { cursor:grab; }
+    .fbody:active { cursor:grabbing; }
+
+    /* A second panel of the same size, to his right. Drawn on his own lattice by
+       the page rather than by the shader: the shader has one face in it, and this
+       is not a face. */
+    /* `&`, not `html.app.card`: these are nested inside html.app, and a nested
+       selector is a descendant of its parent — `html.app html.app.card` matches
+       nothing at all, and does so silently. */
+    &.card { --pw: 50vw; }
+    /* Two circles over his eyes and nothing between them. His panel does not need
+       to be a face tall any more, so it is not. */
+    /* Taller than the eyes need: the readout strip sits under them and is part of
+       the same screen, so the panel has to reach it. */
+    /* Tall enough for all three of him: the brows, the circles, and the strip that
+       reads out under the bar. */
+    &.eyes { --ph: calc(var(--pw) * 1.60);
+      }
+    #card { display:none; position:fixed; left:var(--pw); top:var(--head);
+      width:var(--pw); height:var(--ph);
+      border-radius:calc(30 * var(--s)); z-index:4; }
+    &.card #card { display:block; }
+    .fbody { height:100%; }
+    /* #say is positioned in the second app-mode block below, not here. Two
+       blocks share this breakpoint and the later one wins per property, which has
+       quietly resurrected dead rules three times now. */
+    /* mic diagnostics matter most here — the app's permission is separate from the
+       browser's. Always up when something is wrong, on hover otherwise. */
+    .perm { display:none; }
+    /* It used to be a full-width bar pinned to the top, with square corners
+       hanging over his rounded ones. It is a message, so it looks like one: a
+       floating pill, inset, as wide as what it has to say. */
+    /* fixed, not absolute: it is a sibling of his panel, not a child of it, so
+       "absolute" was resolving against the page and only looked right by accident. */
+    #mic { display:block; position:fixed; z-index:5;
+      left:50%; transform:translateX(-50%); top:calc(9 * var(--s));
+      width:max-content; max-width:82%; text-align:center;
+      border:0; border-radius:calc(11 * var(--s));
+      padding:calc(5 * var(--s)) calc(11 * var(--s));
+      font-size:calc(10.5 * var(--s)); color:#eaeef6;
+      background:var(--glass);
+      box-shadow:var(--glass-lift), var(--glass-edge);
+      opacity:0; pointer-events:none; transition:opacity .16s; }
+    /* `.float:hover #mic` never matched — #mic is his panel's sibling, not its
+       child — so in two months of hovering him this has only ever appeared when
+       something was already wrong. Same trigger as the buttons now. */
+    body:hover #mic, body.near #mic, #mic.bad { opacity:1; }
+    /* They share the band, and only one of them is ever the point. A thought wins
+       over a status line — unless the status is that something is broken. */
+    .think.on ~ #mic:not(.bad) { opacity:0 !important; }
+  }
+  @keyframes pop { from { opacity: 0; transform: translateY(5px); } }
+
+  /* Approach reveals, click commits — the pill appears when the pointer is near him,
+     and the text box only after you ask for it. Idle, he is just a face. */
+  html.app {
+    /* Just under him. These were pinned to the bottom of the window, which was fine
+       when he filled it and left them stranded a hundred-odd pixels below his chin
+       once he became a fixed-height panel with space underneath. */
+    /* It shrinks instead of hiding. Fading to nothing means there is no answer to
+       "is there anything down there" until you happen to move the mouse over him;
+       a small capsule is always there to aim at, and hovering inflates it into the
+       bar. Width and height animate on the same curve so it reads as one object
+       growing rather than two things swapping. */
+    .pill { display:flex; position:fixed; left:50%; bottom:auto;
+      top:var(--bar);
+      transform:translateX(-50%);
+      align-items:center; border-radius:99px;
+      width:calc(40 * var(--s)); height:calc(14 * var(--s)); overflow:hidden;
+      justify-content:center; gap:calc(4 * var(--s)); padding:calc(5 * var(--s));
+      /* Solid, not translucent. There was no border to remove — the ring was the
+         edge of a backdrop-blurred panel, which reads as a hairline outline against
+         anything darker than it. An opaque fill has no such edge. */
+      /* Neutral grey, not his blue: this is chrome sitting near him, not part
+         of the thing he is made of. */
+      background:#2a2a2d; border:0;
+      opacity:.6; pointer-events:auto;
+      transition:width .24s cubic-bezier(.2,.85,.25,1),
+                 height .24s cubic-bezier(.2,.85,.25,1),
+                 opacity .18s, background .18s; }
+    /* .near comes from Rust, which watches the pointer whether or not the app is
+       active and can see it before it arrives. :hover stays in for a plain browser,
+       where there is nothing to send it — and is shut off in the app, where it is
+       worse than useless: an inactive window is never told the pointer left, so a
+       stray mouse event sticks :hover on and the bar never shuts again. */
+    /* 36 + 4 + 36 of buttons and gap, plus the 5 of padding on each side — and
+       nothing over. At 92 there were six spare units spread across the two ends,
+       so the outer button had half again as much room beside it as it had above
+       and below, and the capsule read as loose at both ends. */
+    body:not(.native):hover .pill, body.near .pill {
+      width:calc(86 * var(--s)); height:calc(46 * var(--s)); opacity:1; }
+    body.typing .pill { opacity:0 !important; pointer-events:none !important; }
+    /* Talking opens it the same amount hovering does, so it is one shape doing one
+       thing rather than the bar and the mouth being two different sizes of the
+       same object. */
+    body.talking .pill { width:calc(86 * var(--s)); height:calc(46 * var(--s));
+      opacity:1; }
+    body.talking .pill button { opacity:0; pointer-events:none; }
+    .mouth { position:absolute; inset:calc(5 * var(--s)); opacity:0;
+      pointer-events:none; transition:opacity .16s;
+      /* The light his band is lit with, not the grey the icons are. The capsule is
+         chrome; what is playing inside it is him. */
+      color:hsl(205 52% 86%); }
+    .mouth svg { display:block; width:100%; height:100%; }
+    /* Over the buttons the shader draws, and invisible. 92 and 92 +- 46 in mask
+       units, 312 down, half extents 19 by 15 — the shader's own numbers, times the
+       0.004486 of a panel width that one mask unit is at this zoom. */
+    /* `&`, not `html.app.eyes`. These rules are nested inside html.app, where a
+       selector written out in full becomes a *descendant* of it — html.app inside
+       html.app — and matches nothing at all. */
+    .keys { display:none; }
+    &.eyes .keys { display:block; }
+    /* Above his panel, which sits at 50. At 24 they were laid out in exactly the
+       right place and every click went through them into the canvas behind. */
+    .keys button { position:fixed; appearance:none; background:none; border:0;
+      padding:0; cursor:pointer; z-index:60;
+      width:calc(0.170 * var(--pw)); height:calc(0.134 * var(--pw));
+      top:calc(var(--head) + 1.366 * var(--pw)); border-radius:calc(7 * var(--s)); }
+    #key1 { left:calc(0.209 * var(--pw)); }
+    #key2 { left:calc(0.415 * var(--pw)); }
+    #key3 { left:calc(0.622 * var(--pw)); }
+    body.talking .mouth { opacity:1; transition:opacity .2s .04s; }
+    /* The contents are not squeezed into the capsule, they are simply not there
+       yet: at 12px tall the icons would be clipped to a sliver on the way out. */
+    .pill button svg { opacity:0; transition:opacity .14s .02s; }
+    body:not(.native):hover .pill button svg,
+    body.near .pill button svg { opacity:1;
+      transition:opacity .16s .08s; }
+    body:not(.native):hover .pill button::before,
+    body.near .pill button::before { opacity:1; }
+    /* Round, and sized rather than stretched. Two circles are already two
+       separate shapes, so the divider that used to sit between them was a line
+       drawn for its own sake. */
+    .pill button { position:relative; flex:0 0 auto; background:none; border:0;
+      width:calc(36 * var(--s)); height:calc(36 * var(--s));
+      color:#9b9ba1; padding:0; border-radius:50%; display:flex;
+      align-items:center; justify-content:center; cursor:pointer;
+      transition:color .12s, opacity .16s; }
+    /* The hover state is its own rounded shape, inset from the button's edges, so
+       there is a little of the pill left visible all the way around it. Filling the
+       half edge to edge made it read as two panels; leaving a gap makes it read as
+       one control with something highlighted inside it.
+
+       Flat on flat. No shadow, no rim, no gradient — the gap does all the work of
+       separating the two, and anything on top of it only muddies the edge.
+
+       The chip is lighter than the pill, not darker. A near-black chip turned the
+       gap into a bright hairline: a thin strip of pill with something much darker
+       on one side of it reads as a stroke, which is the border there is no border
+       for. Lighter, and the gap is just a gap. */
+    .pill button::before { content:''; position:absolute; inset:0;
+      border-radius:50%; background:transparent; opacity:0;
+      transition:background .12s, opacity .14s; }
+    .pill button svg { position:relative; display:block;
+      width:calc(19 * var(--s)); height:calc(19 * var(--s));
+      shape-rendering:geometricPrecision; }
+    /* thicker only, not a different shape, so it does not jump when it lights */
+    .pill button.on svg { stroke-width:1.9; }
+    .pill button:hover { color:#e9e9ee; }
+    .pill button:hover::before { background:#3a3a3f; }
+    /* In a call: the circle fills and the icon goes white, the way a call control
+       does. The bars underneath are moving, which is the part that says live. */
+    .pill button.on { color:#ffffff; }
+    .pill button.on::before { background:#48484e; }
+    .pill button.on:hover::before { background:#54545b; }
+
+    /* Below him, in the transparent band the pill lives in, and fully round so it
+       belongs to the same family as the pill rather than to the panel above it.
+       They share the spot because only one of them is ever up. */
+    #sayclose { display:flex; }
+    /* It grows out of the capsule and shrinks back into it, on the same curve and
+       to the same size the button bar collapses to. It used to fade while sliding
+       down, which reads as the thing falling away rather than closing — and the
+       capsule it shares a spot with was already doing the right gesture. */
+    .saywrap { position:fixed; left:50%; transform:translateX(-50%);
+      top:var(--bar); font-size:calc(12.5 * var(--s));
+      width:calc(40 * var(--s)); height:calc(14 * var(--s));
+      display:flex; align-items:center; border-radius:99px; overflow:hidden;
+      background:#2a2a2d;
+      opacity:0; pointer-events:none;
+      transition:width .24s cubic-bezier(.2,.85,.25,1),
+                 height .24s cubic-bezier(.2,.85,.25,1),
+                 opacity .18s; z-index:22; }
+    body.typing .saywrap { opacity:1; pointer-events:auto;
+      width:calc(100vw - 24 * var(--s)); height:calc(46 * var(--s)); }
+    /* The contents are not squeezed into the capsule, they are simply not there
+       yet — the same way the buttons handle it. */
+    .saywrap #say, .saywrap #sayclose { opacity:0; transition:opacity .12s; }
+    body.typing .saywrap #say, body.typing .saywrap #sayclose { opacity:1;
+      transition:opacity .16s .08s; }
+    /* Grey, like everything else down here. The blue is his — it belongs to the
+       face, not to the chrome you type into. */
+    #say { flex:1 1 auto; width:auto; min-width:0; border:0; border-radius:0;
+      background:transparent; text-align:left; font-size:calc(14 * var(--s));
+      color:#e8e8ea; caret-color:#e8e8ea;
+      padding:calc(11 * var(--s)) calc(4 * var(--s))
+              calc(11 * var(--s)) calc(16 * var(--s)); }
+    #say:focus { background:transparent; }
+    #say::placeholder { color:#86868c; }
+    /* Same gesture as the pill. */
+    #sayclose { position:relative; flex:0 0 auto; background:none; border:0;
+      color:#9b9ba1; align-self:stretch; display:flex;
+      padding:0 calc(13 * var(--s)) 0 calc(7 * var(--s));
+      align-items:center; cursor:pointer; transition:color .12s; }
+    #sayclose::before { content:''; position:absolute;
+      inset:calc(5 * var(--s)) calc(4 * var(--s));
+      border-radius:99px; background:transparent; transition:background .12s; }
+    #sayclose svg { position:relative; display:block;
+      width:calc(15 * var(--s)); height:calc(15 * var(--s));
+      shape-rendering:geometricPrecision; }
+    #sayclose:hover { color:#e9e9ee; }
+    #sayclose:hover::before { background:#2a323f; }
+  }
+</style>
+
+<script>
+  // Before first paint, or the app opens on a flash of the development page.
+  // window.__TAURI__ is injected ahead of page scripts, so it can be asked here.
+  (function () {
+    const app = () => !!(window.__TAURI__ && window.__TAURI__.core) || innerWidth <= 520;
+    const set = () => document.documentElement.classList.toggle('app', app());
+    addEventListener('resize', set);
+    set();
+  })();
+</script>
+
+<!-- Above him, because what he has to say should not be written across the one
+     part of this that is meant to be readable at a glance. -->
+<div class="think" id="think"><div class="bub" id="bub"></div></div>
+
+<div class="float" id="float">
+  <div class="grip" id="grip" data-tauri-drag-region><span>ROVE</span><span class="s"></span>
+    <button id="pop">pop out</button></div>
+  <!-- The drag region is on the body, not on the canvas: the canvas is display:none
+       wherever Metal is drawing, which left the only handle on a hidden element. -->
+  <div class="fbody" id="fbody" data-tauri-drag-region>
+    <canvas id="face" data-tauri-drag-region></canvas>
+  </div>
+</div>
+
+<canvas id="card"></canvas>
+
+<!-- Outside .float on purpose: it is not part of him, it is a thing you type into
+     that happens to be near him. Inside his panel it cut a rectangular slab off the
+     bottom of a rounded window and sat on the same surface as his face.
+
+     An input cannot hold children, so the field is a wrapper: the input fills it and
+     the close button sits on top at the right. -->
+<div class="saywrap" id="saywrap">
+  <input type="text" id="say" placeholder="type to him…" autocomplete="off" />
+  <button id="sayclose" title="close" aria-label="close">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+  </button>
+</div>
+
+<div class="pill" id="pill">
+  <button id="pillType" title="type to him" aria-label="type to him">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"
+         stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M13.5 4.5H6.5A2.5 2.5 0 0 0 4 7v10.5A2.5 2.5 0 0 0 6.5 20H17a2.5 2.5 0 0 0 2.5-2.5v-7"/>
+      <path d="M17.9 3.6a2 2 0 0 1 2.8 2.8l-8 8-3.5.7.7-3.5z"/>
+    </svg>
+  </button>
+  <button id="pillMic" title="talk to him" aria-label="talk to him">
+    <!-- Level bars rather than a microphone. A microphone is a picture of the
+         hardware; these are a picture of the thing happening, and they can move
+         with your voice, which a microphone cannot. Round caps and even spacing:
+         the earlier set of bars read as crunchy because they were straight ends at
+         half-pixel offsets, which is not the same complaint as "bars". -->
+    <svg id="wave" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+         stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <line x1="5"    y1="9.5" x2="5"    y2="14.5"/>
+      <line x1="8.5"  y1="7"   x2="8.5"  y2="17"/>
+      <line x1="12"   y1="4.5" x2="12"   y2="19.5"/>
+      <line x1="15.5" y1="7"   x2="15.5" y2="17"/>
+      <line x1="19"   y1="9.5" x2="19"   y2="14.5"/>
+    </svg>
+  </button>
+  <!-- His mouth, for as long as he is the one talking. The capsule is already
+       where you look when he is doing something; while he speaks it stops being
+       two buttons and becomes a readout of what is coming out of him. The bars are
+       written by script rather than by hand: fifteen of them is a wall of markup
+       that says nothing the loop does not already say. -->
+  <div class="mouth" id="mouth" aria-hidden="true">
+    <svg id="mouthwave" viewBox="0 0 76 36" fill="none" stroke="currentColor"
+         stroke-width="2.8" stroke-linecap="round"></svg>
+  </div>
+</div>
+
+<!-- The three buttons on his case are drawn by the shader, which cannot be
+     clicked. These sit exactly over them and do nothing but take the click: the
+     positions are the same mask coordinates the shader uses, converted once here,
+     so there is one layout and not two that have to agree. -->
+<div class="keys" id="keys">
+  <button id="key1" title="backlight" aria-label="backlight"></button>
+  <button id="key2" title="microphone" aria-label="microphone"></button>
+  <button id="key3" title="screen" aria-label="screen"></button>
+</div>
+
+<header>
+  <span class="brand">ROVE · DESKTOP DRIVE</span>
+  <span class="sp"></span>
+  <button id="auto" title="run menu items without asking first">confirm menus</button>
+  <button id="listen">start listening</button>
+</header>
+<div class="perm" id="perm">checking what it can reach…</div>
+<div class="perm" id="mic">mic: off</div>
+<div class="log" id="log"></div>
+<footer><span id="lat">—</span><span id="cost">—</span><span class="err" id="err"></span></footer>
+
+<script type="module">
+window.fetch = async () => ({json:async()=>({controls:[],accessibility:false,error:"Desktop actions disabled in voice test"})});
+
+const { SVG_W, SVG_H, PAD, MW, MH, EYE, BAND_H, MOUTH, BROW_L, BROW_R,
+         STROKE, MOUTH_STROKE, NX, NY, LATTICE, LATTICE_METAL,
+         paintFace } = (() => {// The face itself: geometry from design/face.svg and design/face-eye-band.svg,
+// drawn as real curves into a coverage mask that the dot grid then samples.
+//
+// This lives on its own because three things draw this face now — the live app,
+// the app icon, and the menu bar glyph — and a constant copied into three files
+// is a constant that will disagree with itself by next week. The numbers below
+// are the numbers in the SVGs; nothing here rounds them.
+
+const SVG_W = 148, SVG_H = 158;
+
+// The 10px brow stroke overflows the viewBox at the top and `lift` raises it
+// further, so the mask is padded rather than clipped.
+const PAD = 14;
+const MW = SVG_W + PAD * 2, MH = SVG_H + PAD * 2;
+
+const EYE = { y: 74.7015, rx: 25.7625, ry: 29.9906, lx: 34.3875, rx_: 121.294 };
+const BAND_H = 11.7396;                // from the mask rect in the second SVG
+// A shut eye. Not a smaller eye: the mouth's curve with most of the bend taken
+// out, at a stroke between the mouth's and the brows'. SHUT_AT is the openness
+// below which he has stopped having eyes and started having lids.
+const LID_STROKE = 8, LID_BEND = 9, SHUT_AT = 0.22;
+const smooth01 = t => { const x = Math.min(1, Math.max(0, t)); return x * x * (3 - 2 * x); };
+const MOUTH = { x0: 37.5703, y0: 141.477, c1x: 61.4741, c2x: 81.0825, x3: 106.117,
+                       c1dy: 13.77, c2dy: 14.272 };   // control offsets from the baseline
+const BROW_L = { x0: 53.2969, y0: 6.21875, c2x: 19.0652, c2y: 3.2504, x3: 4.43632, y3: 19.3109 };
+const BROW_R = { x0: 87.2578, y0: 6.21875, c2x: 121.489, c2y: 3.2504, x3: 136.118, y3: 19.3109 };
+// The dot grid. Here rather than in the page because the page is no longer the
+// only thing drawing it — facelab.html samples the same mask the same way, and a
+// grid that disagrees would make the lab lie about the thing it exists to show.
+const NX = 30;                         // ~9-dot eyes, as in the reference
+const NY = Math.round(NX * MH / MW);
+const LATTICE = 0.020;                 // unlit dot, canvas
+const LATTICE_METAL = 0.055;           // unlit dot, shader
+
+const STROKE = 10;        // brows
+const MOUTH_STROKE = 6.5; // the mouth wants to be finer than the brows
+
+/// How far the brows ride with the eyes.
+///
+/// They are skin over the orbital ridge, not separate objects parked above it:
+/// the eye's travel drags them, less than one-to-one sideways and more than
+/// one-to-one vertically, because looking up lifts a brow much further than the
+/// eye itself moves. A blink contracts the whole orbit, so they dip with it, and
+/// a wide eye carries its brow up while a squint pulls it down — which is the
+/// difference between an expression and two lines that happen to sit above some
+/// eyes.
+///
+/// All of this is sub-dot at the grid sizes used here. It still reads, because
+/// the mask is sampled by coverage rather than hit-tested: a brow moving a third
+/// of a dot lights the dot below it and dims the one above.
+function browOffset({ gazeX = 0, gazeY = 0, open = 1, blink = 0 }) {
+  return {
+    dx: gazeX * 4.5 * 0.6,
+    dy: gazeY * 3.5 * 1.5 - (open - 1) * 22 + blink * 3.0,
+  };
+}
+
+/// Draw the face into `c`, a 2D context on an MW x MH surface. Coverage comes back
+/// in the alpha channel: eyes at 0.38 for the body and 1.0 for the bright band,
+/// brows and mouth at 0.70 so they read a step dimmer than the highlight.
+function paintFace(c, p = {}) {
+  const {
+    mouth = 1, lift = 0, tilt = 0, skew = 0, open = 0.94,
+    blink = 0, gazeX = 0, gazeY = 0, wake = 1,
+    // A coarse sample drops anything thinner than its cell, and at menu-bar sizes
+    // the cell is wider than both strokes — the face arrives as two eyes and
+    // nothing else. Fattening them is not cheating the geometry; it is the same
+    // thing a type designer does cutting a face for small sizes.
+    browStroke = STROKE, mouthStroke = MOUTH_STROKE,
+    // Where the pupil sits inside an eye that has not itself moved, as a fraction
+    // of eye radius: negative up, positive down. `pupilScale` thickens or thins it.
+    pupil = 0, pupilScale = 1,
+  } = p;
+
+  c.setTransform(1, 0, 0, 1, 0, 0);
+  c.clearRect(0, 0, MW, MH);
+  c.translate(PAD, PAD);
+  c.lineCap = 'butt';
+  c.lineWidth = browStroke;
+
+  const openRaw = open * (1 - blink) * wake;
+  const openF = Math.max(0.05, openRaw);
+  // An ellipse squashed towards nothing tapers to points at both ends, so the last
+  // of it still wide enough to cover a cell is the middle two or three dots: he
+  // lost his eyes rather than closing them. Below SHUT_AT they hand over to a lid.
+  const shutF = smooth01(1 - openRaw / SHUT_AT);
+
+  // ---- eyes: dim body, bright band ----
+  //
+  // The band is the pupil, so it does not simply ride along with the eye — it
+  // slides *within* it, about three times as far as the eye itself moves, and the
+  // clip cuts it off against the far edge. That difference is the whole reason an
+  // eye reads as looking somewhere rather than as a shape being translated. A
+  // band nailed to the centre of its own eye is a visor.
+  for (const ex of [EYE.lx, EYE.rx_]) {
+    const cx = ex + gazeX * 1.8, cy = EYE.y + gazeY * 1.5;
+    const ry = EYE.ry * openF;
+    c.globalAlpha = 0.38 * (1 - shutF);
+    c.fillStyle = '#fff';
+    c.beginPath();
+    c.ellipse(cx, cy, EYE.rx, ry, 0, 0, Math.PI * 2);
+    c.fill();
+
+    c.globalAlpha = 1 - shutF;
+    c.save();
+    c.beginPath();
+    c.ellipse(cx, cy, EYE.rx, ry, 0, 0, Math.PI * 2);
+    c.clip();
+    // A narrowed eye squeezes its pupil rather than scaling it away to nothing,
+    // and `pupil` lets a mood raise or lower it inside an eye that has not moved:
+    // negative is up, which is surprise, positive is down, which is doubt.
+    const bh = BAND_H * Math.max(0.45, openF) * pupilScale;
+    const px = cx + gazeX * 6.5;
+    const py = cy + gazeY * 4.5 + pupil * ry;
+    c.fillRect(px - EYE.rx, py - bh / 2, EYE.rx * 2, bh);
+    c.restore();
+
+    if (shutF > 0.002) {
+      c.save();
+      // Brow and mouth weight, not pupil weight. The bright band *is* the pupil,
+      // and a pupil behind a closed lid is not visible — a lid lit like one reads
+      // as an eye still open and squinting.
+      c.globalAlpha = 0.70 * shutF;
+      c.strokeStyle = '#fff';
+      c.lineWidth = LID_STROKE;
+      c.lineCap = 'round';
+      c.beginPath();
+      c.moveTo(cx - EYE.rx, cy);
+      c.quadraticCurveTo(cx, cy + LID_BEND, cx + EYE.rx, cy);
+      c.stroke();
+      c.restore();
+    }
+  }
+
+  c.globalAlpha = 0.70;
+  c.strokeStyle = '#fff';
+
+  // ---- brows ----
+  const { dx: browDX, dy: browDY } = browOffset({ gazeX, gazeY, open, blink });
+  for (const [side, B] of [[-1, BROW_L], [1, BROW_R]]) {
+    const midX = (B.x0 + B.x3) / 2, midY = (B.y0 + B.y3) / 2;
+    c.save();
+    c.translate(browDX, browDY);
+    c.translate(0, -lift * 9 - (side < 0 ? skew * 9 : 0));
+    c.translate(midX, midY);
+    c.rotate(side * tilt * 0.34);
+    c.translate(-midX, -midY);
+    c.beginPath();
+    c.moveTo(B.x0, B.y0);
+    c.bezierCurveTo(B.x0, B.y0, B.c2x, B.c2y, B.x3, B.y3);
+    c.stroke();
+    c.restore();
+  }
+
+  // ---- mouth: control offsets scale with `mouth`, so 1.0 is exactly the drawn
+  // smile, 0 is flat and -1 its mirror ----
+  c.lineWidth = mouthStroke;
+  c.lineCap = 'round';
+  c.beginPath();
+  c.moveTo(MOUTH.x0, MOUTH.y0);
+  c.bezierCurveTo(MOUTH.c1x, MOUTH.y0 + MOUTH.c1dy * mouth,
+                  MOUTH.c2x, MOUTH.y0 + MOUTH.c2dy * mouth,
+                  MOUTH.x3, MOUTH.y0);
+  c.stroke();
+
+  return c.getImageData(0, 0, MW, MH).data;
+}
+; return { SVG_W, SVG_H, PAD, MW, MH, EYE, BAND_H, MOUTH, BROW_L, BROW_R,
+         STROKE, MOUTH_STROKE, NX, NY, LATTICE, LATTICE_METAL,
+         paintFace };})();
+const weatherCard = (() => {// What he shows when an answer is worth looking at rather than reading.
+//
+// A card is a grid of coverage values on the same lattice his face is drawn on —
+// same cell count, same 0..1 per cell — so the page can hand it to the same dot
+// pass and it comes out as one more thing his panel is displaying. Nothing here
+// knows about pixels, canvases or colour; it draws on cells.
+
+
+
+// ---------------------------------------------------------------------------
+// A 3x5 face. Small enough that two digits and a degree sign fit across half his
+// grid at double size, which is the size a temperature wants to be read at.
+const GLYPHS = {
+  '0': ['111', '101', '101', '101', '111'],
+  '1': ['010', '110', '010', '010', '111'],
+  '2': ['111', '001', '111', '100', '111'],
+  '3': ['111', '001', '111', '001', '111'],
+  '4': ['101', '101', '111', '001', '001'],
+  '5': ['111', '100', '111', '001', '111'],
+  '6': ['111', '100', '111', '101', '111'],
+  '7': ['111', '001', '010', '010', '010'],
+  '8': ['111', '101', '111', '101', '111'],
+  '9': ['111', '101', '111', '001', '111'],
+  '-': ['000', '000', '111', '000', '000'],
+  '/': ['001', '001', '010', '100', '100'],
+  '°': ['110', '110', '000', '000', '000'],
+  '%': ['101', '001', '010', '100', '101'],
+  ' ': ['000', '000', '000', '000', '000'],
+};
+
+const W = 3, H = 5;
+
+function textWidth(s, scale = 1, gap = 1) {
+  if (!s.length) return 0;
+  return s.length * W * scale + (s.length - 1) * gap;
+}
+
+// ---------------------------------------------------------------------------
+// The weather, as six things you can tell apart at a glance rather than the full
+// WMO table. A sixteen-cell icon has room for a shape, not for a distinction
+// between "slight" and "moderate" drizzle.
+const SUN = [
+  '.......##.......',
+  '...#...##...#...',
+  '....#.####.#....',
+  '.....######.....',
+  '#...########...#',
+  '#..##########..#',
+  '#..##########..#',
+  '#...########...#',
+  '.....######.....',
+  '....#.####.#....',
+  '...#...##...#...',
+  '.......##.......',
+];
+
+const CLOUD = [
+  '................',
+  '................',
+  '.....#####......',
+  '...#########....',
+  '..###########...',
+  '.#############..',
+  '.##############.',
+  '.##############.',
+  '..############..',
+  '................',
+  '................',
+  '................',
+];
+
+const PARTLY = [
+  '..........###...',
+  '.........#####..',
+  '....#....#####..',
+  '.....#....###...',
+  '..#####.........',
+  '.#########......',
+  '###########.....',
+  '#############...',
+  '##############..',
+  '.#############..',
+  '................',
+  '................',
+];
+
+const RAIN = [
+  '.....#####......',
+  '...#########....',
+  '..###########...',
+  '.#############..',
+  '.##############.',
+  '..############..',
+  '................',
+  '..#...#...#...#.',
+  '.#...#...#...#..',
+  '................',
+  '..#...#...#...#.',
+  '.#...#...#...#..',
+];
+
+const SNOW = [
+  '.....#####......',
+  '...#########....',
+  '..###########...',
+  '.#############..',
+  '.##############.',
+  '..############..',
+  '................',
+  '..#.#...#.#...#.',
+  '...#.....#......',
+  '..#.#...#.#...#.',
+  '................',
+  '....#.#...#.#...',
+];
+
+const STORM = [
+  '.....#####......',
+  '...#########....',
+  '..###########...',
+  '.#############..',
+  '.##############.',
+  '..############..',
+  '................',
+  '.......###......',
+  '......###.......',
+  '.....######.....',
+  '.......###......',
+  '......##........',
+];
+
+const FOG = [
+  '................',
+  '..############..',
+  '................',
+  '.##############.',
+  '................',
+  '..############..',
+  '................',
+  '.##############.',
+  '................',
+  '..###########...',
+  '................',
+  '................',
+];
+
+/// WMO code to a shape. The table is the one open-meteo documents; the grouping is
+/// mine, and deliberately coarse.
+function icon(code) {
+  if (code === 0) return SUN;
+  if (code === 1 || code === 2) return PARTLY;
+  if (code === 3) return CLOUD;
+  if (code === 45 || code === 48) return FOG;
+  if (code >= 71 && code <= 77) return SNOW;
+  if (code === 85 || code === 86) return SNOW;
+  if (code >= 95) return STORM;
+  if (code >= 51) return RAIN;
+  return CLOUD;
+}
+
+// ---------------------------------------------------------------------------
+/// A blank card: coverage per cell, row-major, on his own lattice.
+function blank() {
+  return { cols: NX, rows: NY, cells: new Float32Array(NX * NY) };
+}
+
+function put(card, x, y, v) {
+  if (x < 0 || y < 0 || x >= card.cols || y >= card.rows) return;
+  const i = y * card.cols + x;
+  if (v > card.cells[i]) card.cells[i] = v;
+}
+
+function stamp(card, art, x0, y0, v = 1) {
+  art.forEach((row, y) => {
+    for (let x = 0; x < row.length; x++) {
+      if (row[x] === '#' || row[x] === '1') put(card, x0 + x, y0 + y, v);
+    }
+  });
+}
+
+function text(card, s, x0, y0, scale = 1, v = 1, gap = 1) {
+  let x = x0;
+  for (const ch of s) {
+    const g = GLYPHS[ch] ?? GLYPHS[' '];
+    for (let gy = 0; gy < H; gy++) {
+      for (let gx = 0; gx < W; gx++) {
+        if (g[gy][gx] !== '1') continue;
+        for (let sy = 0; sy < scale; sy++) {
+          for (let sx = 0; sx < scale; sx++) {
+            put(card, x + gx * scale + sx, y0 + gy * scale + sy, v);
+          }
+        }
+      }
+    }
+    x += W * scale + gap;
+  }
+  return x - gap;
+}
+
+/// The weather card: a shape you read at a glance, a temperature you read on
+/// purpose, and the rest small enough to ignore.
+///
+/// Brightness carries the hierarchy, the way it does on his face — the icon and the
+/// high are full coverage, the second line sits at the weight his brows and mouth
+/// use, so it reads as a step back rather than as clutter.
+function weather({ code = 3, high = null, low = null, precip = null, deg = 'F' }) {
+  const card = blank();
+  const art = icon(code);
+  stamp(card, art, Math.round((NX - 16) / 2), 2, 1);
+
+  const hi = high == null ? '--' : String(Math.round(high));
+  const top = `${hi}°`;
+  text(card, top, Math.round((NX - textWidth(top, 2)) / 2), 16, 2, 1);
+
+  const bits = [];
+  if (low != null) bits.push(`${Math.round(low)}°`);
+  if (precip != null) bits.push(`${Math.round(precip)}%`);
+  const line = bits.join(' ');
+  if (line) text(card, line, Math.round((NX - textWidth(line)) / 2), 27, 1, 0.7);
+
+  return card;
+}
+; return weather;})();
+// ---------------------------------------------------------------------------
+// The same loop as voice-drive.html, pointed at the machine instead of a page.
+//
+//   speech -> controls that exist RIGHT NOW -> Jev picks one -> osascript acts
+//
+// Controls come from three places, in increasing order of what they need:
+//   app:   every running application                    (no permission)
+//   tab:   every Chrome tab, by title                   (no permission)
+//   item:  the frontmost app's menu items, one deep     (Accessibility)
+//
+// The frontmost app is the menu target, so driving another app is naturally two
+// steps — "pull up claude", then "next session" — which is also how people say it.
+//
+// SAFETY. The model never emits a command. It returns an id from the list the proxy
+// enumerated moments earlier; the proxy looks that id up and acts on stored values.
+// Menu items can be destructive ("Close Session", "Close All"), so they ask first by
+// default. Switching apps and tabs is reversible and does not.
+// ---------------------------------------------------------------------------
+
+const ACT_MIN = 0.60, CONF_MIN = 0.45;
+// An app switch gets a much higher bar than anything else.
+//
+// A name is either in the running-apps list or it is not, so there is no honest
+// reason for a middling answer — and when the app is absent the model says so
+// plainly: "open slack" comes back at 1.00 with Slack running, "open codex" at 0.55
+// with Codex not running, picking OpenCode as the nearest thing. 0.45 let that
+// through, and then the loop went on to type the rest of the request into
+// OpenCode's prompt. The confidence was never the problem; the floor was.
+const APP_MIN = 0.80;
+const USD_PER_INPUT_TOKEN = 0.042 / 1e6;   // jev-1.13.0, output free
+let confirmMenus = true, inTokens = 0, decisions = 0;
+
+const logEl = document.getElementById('log'), permEl = document.getElementById('perm');
+const latEl = document.getElementById('lat'), costEl = document.getElementById('cost');
+const errEl = document.getElementById('err');
+
+// Tool output is other people's text — Wikipedia extracts, PR titles off GitHub,
+// whatever was dictated. It goes into innerHTML, so it gets escaped on the way in.
+const esc = (t) => String(t ?? '').replace(/[&<>"']/g, (c) =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+
+function ev(cls, html) {
+  const d = document.createElement('div');
+  d.className = `ev ${cls}`; d.innerHTML = html;
+  logEl.prepend(d);
+  while (logEl.children.length > 20) logEl.lastChild.remove();
+
+  // In the app only the first row is shown, as a card under his face, so it needs a
+  // way out: click it, or let it go on its own. A message with no way to dismiss it
+  // is a message that is still there an hour later.
+  clearTimeout(evTimer);
+  const go = () => { if (d.parentNode) d.remove(); };
+  d.addEventListener('click', (e) => { if (!e.target.closest('button')) go(); });
+  if (cls !== 'ask') evTimer = setTimeout(go, 14000);
+  return d;
+}
+let evTimer = 0;
+
+// ?level=0.6 pins the mic level, because everything driven by it — the shear, the
+// bloom lift, the chromatic split — is otherwise only visible while someone is
+// actually talking, which makes it impossible to look at while tuning.
+const LEVEL_FIX = (() => {
+  const v = parseFloat(new URLSearchParams(location.search).get('level'));
+  return Number.isFinite(v) ? Math.max(0, Math.min(1, v)) : null;
+})();
+
+// --- mic level ---------------------------------------------------------------
+//
+// SpeechRecognition hands back text but never amplitude, so there is no way to tell
+// from it whether the mic is even hearing you — you only learn anything once a whole
+// utterance has been recognised AND a decision has come back. That is far too late to
+// answer "is this thing on". A second, independent Web Audio tap on the mic gives a
+// live level, which is the only honest "I can hear you" signal available.
+
+let analyser = null, audioBuf = null, audioCtx = null, micStream = null;
+let level = 0;                       // smoothed 0..1
+const HIST = new Array(46).fill(0);  // scrolling history, newest last
+
+async function startLevels() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = audioCtx.createMediaStreamSource(micStream);
+  analyser = audioCtx.createAnalyser();
+  analyser.fftSize = 512;
+  src.connect(analyser);
+  audioBuf = new Uint8Array(analyser.fftSize);
+}
+function stopLevels() {
+  if (micStream) for (const t of micStream.getTracks()) t.stop();
+  if (audioCtx) audioCtx.close().catch(() => {});
+  analyser = null; audioBuf = null; audioCtx = null; micStream = null;
+  level = 0; HIST.fill(0);
+}
+function readLevel() {
+  if (!analyser) return 0;
+  analyser.getByteTimeDomainData(audioBuf);
+  let sum = 0;
+  for (let i = 0; i < audioBuf.length; i++) { const v = (audioBuf[i] - 128) / 128; sum += v * v; }
+  const rms = Math.sqrt(sum / audioBuf.length);
+  // room tone sits around 0.005; speech runs an order of magnitude above it
+  return Math.min(1, Math.max(0, (rms - 0.006) / 0.075));
+}
+
+// --- face: the status light -------------------------------------------------
+
+const fc = document.getElementById('face');
+const fx = fc.getContext('2d');
+
+const M = { idle:0, heard:1, acted:2, lost:3, ask:4, glad:5, cross:6, scared:7, roll:8 };
+let mood = M.idle, moodAt = 0;
+let look={x:0,y:0}, lookTo={x:0,y:0}, nextSac=0, blink=0, nextBlink=2600, shut=0;
+// How much he is being talked to right now, and where his panel is pointed.
+let heard=0, tiltX=0, tiltY=0;
+const bornAt = performance.now();   // he is there from the first frame, just not awake yet
+// Brows need three separate things, not one signed number. Collapsing them into
+// one value is what made every expression read backwards: `lift` raises both,
+// `tilt` angles the inner ends (+ up = worried or questioning, - down = set or
+// determined), `skew` raises one brow alone, which is what a quizzical look is.
+let lift=0, liftTo=0, tilt=0, tiltTo=0, skew=0, skewTo=0;
+// The two lids on the circles, as things an expression *sets* rather than things
+// that fall out of how open or how happy he is. Deriving the lower one from the
+// mouth meant a cheek was up under both eyes whenever he smiled, which is most of
+// the time; it belongs to two expressions and no others — the squint of laughing,
+// and the set of being cross.
+let hood=0, hoodTo=0, low=0, lowTo=0, gape=1, gapeTo=1, gapeSet=false;
+let mouth=0, mouthTo=0, open=1, openTo=1;
+// The bright band in each eye is a pupil, not a visor stripe: `pupil` moves it up
+// (negative) or down inside an eye that has not itself moved, `pupilScale` thins or
+// thickens it. Both are expression, not gaze.
+let pupil=0, pupilTo=0, pupilScale=1, pupilScaleTo=1;
+// The card beside him is lit in whatever colour he is, and it is drawn once when it
+// appears rather than every frame — so a change of mood has to go and fetch it.
+let repaintCard = () => {};
+const setMood = (m) => { mood = m; moodAt = performance.now(); repaintCard(); };
+
+function set(m, l, ti, sk, o, pu = 0, ps = 1, hd = 0, lo = 0, ga = null) {
+  mouthTo=m; liftTo=l; tiltTo=ti; skewTo=sk; openTo=o; pupilTo=pu; pupilScaleTo=ps;
+  hoodTo=hd; lowTo=lo;
+  // How far it opens follows how far it smiles unless a face says otherwise. Set
+  // here it would be reading the mood's own mouth and missing everything the idle
+  // cycle and the live read add to it afterwards, so it is only remembered here
+  // and resolved once they have all had their turn.
+  gapeTo = ga; gapeSet = ga !== null;
+}
+
+// What he does with himself when nothing is happening.
+//
+// A face that holds one expression while it waits is a rendering, not a character.
+// These are four things a person does in a lull — attending to you, glancing off
+// at something, letting the lids down, and coming back — held for a few seconds
+// each and glided between like any other mood. Where he looks is part of the pose
+// and most of what says which one it is, so the saccade takes its orders from here
+// rather than being uniformly random.
+const IDLE = [
+  //  mouth  lift   tilt   eyes   hood   low    hold  looking
+  { m: 0.25, l: 0.45, t: 0.00, o: 1.14, h: 0.00, w: 0.00, hold: 3.4, at: 'you'  },  // interested
+  { m: 0.10, l: 0.06, t: 0.06, o: 0.98, h: 0.00, w: 0.00, hold: 4.6, at: 'away' },  // looking about
+  // Bored closes from above only. A lower lid up is a cheek, and a cheek is
+  // either laughing or cross, neither of which is what waiting looks like.
+  { m:-0.18, l:-0.30, t:-0.08, o: 0.86, h: 0.15, w: 0.00, hold: 5.2, at: 'down' },
+  { m: 0.60, l: 0.22, t: 0.00, o: 1.04, h: 0.00, w: 0.00, hold: 2.4, at: 'you'  },  // back to you
+  // Something pleases him for a second. The only idle pose that shows a lower
+  // lid at all, which is what makes it read as a private joke rather than a mood.
+  { m: 1.25, l: 0.26, t:-0.05, o: 0.92, h: 0.02, w: 0.42, hold: 1.8, at: 'you'  },
+];
+let idleAt = 0, idleN = 0, idleAim = 'away';
+
+// Features are drawn as real curves into a small mask, then sampled once per dot.
+// Computing each dot analytically gives blocky eyes and untapered brows; a mask gets
+// proper ellipses and quadratics, and its partial coverage softens every edge.
+// ---------------------------------------------------------------------------
+// Geometry comes straight from the design SVGs (facce.svg / Group 1261153552),
+// drawn at their native 148x158 viewBox so the numbers below are the numbers in
+// the file. The pieces are then transformed to animate:
+//   eyes   scale vertically for openness and blink, translate for gaze
+//   band   the masked rect from the second SVG — a bright stripe clipped to the
+//          eye, which is what reads as a pupil
+//   brows  translate for lift, rotate about their own midpoint for tilt
+//   mouth  the cubic's control offsets are multiplied, so +1 is the drawn smile,
+//          0 is flat and -1 is its mirror
+// ---------------------------------------------------------------------------
+// The 12px stroke overflows the viewBox at the brows, and `lift` raises them further,
+// so the mask carries a margin and the drawing is offset into it.
+const mask = document.createElement('canvas');
+mask.width = MW; mask.height = MH;
+const mx_ = mask.getContext('2d', { willReadFrequently: true });
+const dotsC = document.createElement('canvas');
+const dotsX = dotsC.getContext('2d');
+
+// Grain. Generated once as a small tile and re-anchored at a random offset every
+// frame — building fresh noise per frame at full size costs far more than it looks.
+const GRAIN = 128;
+const blurC = document.createElement('canvas');
+const blurX = blurC.getContext('2d');
+
+const grainC = document.createElement('canvas');
+grainC.width = grainC.height = GRAIN;
+{
+  const g = grainC.getContext('2d');
+  const img = g.createImageData(GRAIN, GRAIN);
+  for (let i = 0; i < img.data.length; i += 4) {
+    const v = Math.random() * 255;
+    img.data[i] = img.data[i+1] = img.data[i+2] = v;
+    img.data[i+3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+}
+let grainPat = null;
+
+
+function hash(x, y) {
+  let h = x * 374761393 + y * 668265263;
+  h = (h ^ (h >> 13)) * 1274126177;
+  return ((h ^ (h >> 16)) >>> 0) / 4294967295;
+}
+
+function paintMask() {
+  const age = (performance.now() - bornAt) / 1000;
+  const w = age < 0.30 ? 0 : Math.min(1, (age - 0.30) / 0.80);
+  return paintFace(mx_, {
+    mouth, lift, tilt, skew, open, blink, pupil, pupilScale,
+    gazeX: look.x, gazeY: look.y,
+    wake: w * w * (3 - 2 * w),
+  });
+}
+
+// One palette for both renderers. The Metal path had quietly kept the old numbers
+// — hue 214, saturation 72 — through a whole shading pass done on the canvas, which
+// is exactly the drift that having two renderers invites. Neither of them gets to
+// hold its own copy.
+//
+// Icy rather than electric: the panel this is meant to look like is nearly grey at
+// the dim end and only picks up colour as it gets brighter.
+function palette() {
+  return {
+    hue: mood===M.acted?158 : mood===M.lost?18 : mood===M.ask?38 : mood===M.heard?188 : 205,
+    sat: (mood===M.idle?52:60) + level * 10,
+  };
+}
+
+// Barely there, but there. It only has to say "this is a cell that is off" — any
+// more and the grid competes with the face drawn on it, any less and the panel is
+// just black with some lit shapes on it.
+//
+// Two numbers because the two renderers composite differently: the canvas draws the
+// lattice as an alpha over a partially-cleared frame, so it accumulates, while the
+// shader adds a colour once per frame. Measured on screen, the shader's 0.012 put
+// the lattice about one-and-a-half values out of 255 above the gaps between dots,
+// which is invisible.
+// NX, NY and the lattice levels come from face-mask.mjs — facelab.html draws the
+// same grid, and two copies of it would drift.
+
+function glowPass(w, h, div, alpha) {
+  const bw = Math.max(1, Math.round(w / div)), bh = Math.max(1, Math.round(h / div));
+  if (blurC.width !== bw || blurC.height !== bh) { blurC.width = bw; blurC.height = bh; }
+  blurX.clearRect(0, 0, bw, bh);
+  blurX.imageSmoothingEnabled = true;
+  blurX.drawImage(dotsC, 0, 0, bw, bh);      // down: averages neighbouring pixels
+  fx.imageSmoothingEnabled = true;
+  fx.globalAlpha = alpha;
+  fx.drawImage(blurC, 0, 0, w, h);           // up: bilinear spreads it back out
+}
+
+// He used to fringe red and blue as you spoke — a lens coming apart. It read as a
+// malfunction rather than as attention, so it is gone: leaning in and widening his
+// eyes says the same thing about listening without saying anything about breaking.
+
+// ---- nod and shake -----------------------------------------------------------
+// He answers before the log does: a nod when he acted, a shake when he could not.
+let nodAt = -9e9, shakeAt = -9e9;
+const nod = () => { nodAt = performance.now(); };
+const shake = () => { shakeAt = performance.now(); };
+function gesture(now, at, dur, cycles) {
+  const e = (now - at) / dur;
+  if (e < 0 || e > 1) return 0;
+  // Exponential decay with a short ease-in. A linear (1 - e) envelope starts at full
+  // amplitude on the first frame, which is the jerk you feel at the beginning of a nod;
+  // real heads accelerate into the movement and ring down out of it.
+  const attack = Math.min(1, e / 0.12);
+  return Math.sin(e * Math.PI * 2 * cycles) * Math.exp(-e * 3.2) * attack;
+}
+
+function drawFace(t) {
+  const w = fc.width, h = fc.height;
+  if (dotsC.width !== w || dotsC.height !== h) { dotsC.width = w; dotsC.height = h; }
+  const band = Math.round(h * 0.18);
+  const fh = h - band;
+
+  // Partial clear rather than a full one: what was drawn last frame survives a
+  // little, so a dot that goes out fades instead of cutting. A worse monitor
+  // holds its phosphor longer, which is the look — lower alpha, longer ghost.
+  fx.fillStyle = 'rgba(3, 4, 7, 0.34)'; fx.fillRect(0, 0, w, h);
+  dotsX.clearRect(0, 0, w, h);
+
+  const px_ = paintMask();
+  const { hue, sat } = palette();
+
+  // Centre him in the whole panel, not in the space above the voice stream. The
+  // stream is empty until you speak, so reserving its height left him sitting high.
+  const fit = Math.min(w * 0.94 / MW, h * 0.86 / MH);
+  const fw = MW * fit, fhh = MH * fit;
+  const cellX = fw / NX, cellY = fhh / NY, cell = Math.min(cellX, cellY);
+  const now_ = performance.now();
+  const ox = (w - fw) / 2 + gesture(now_, shakeAt, 620, 2.5) * cell * 1.9;
+  const oy = (h - fhh) / 2 + gesture(now_, nodAt, 620, 2) * cell * 1.6;
+
+  // Cells are snapped to whole device pixels, and the GAP is what stays constant.
+  //
+  // The grid pitch is fractional — the panel is not a whole number of cells wide —
+  // so drawing each dot at `origin + index * pitch` with one fixed size lands some
+  // gaps a pixel wider than their neighbours, and at this scale one pixel is a
+  // visible difference. Deriving each dot from its own rounded cell edges makes
+  // every gap exactly GAP; what varies instead is the dot, by at most a pixel,
+  // which reads as nothing.
+  const GAP = Math.max(1, Math.round(cell * 0.14));
+  const edgeX = (g) => Math.round(ox + g * cellX);
+  const edgeY = (g) => Math.round(oy + g * cellY);
+
+  // The lattice runs past every edge of the window, not just across the face's own
+  // grid. A panel that stops short of the glass is a picture of a panel; the dots
+  // have to reach the corners, and the face is then something lit *on* it. Same
+  // grid, same origin, so the two stay in register — including through a nod,
+  // where the whole display moves rather than the face sliding across it.
+  const gx0 = Math.floor(-ox / cellX) - 1, gx1 = Math.ceil((w - ox) / cellX) + 1;
+  const gy0 = Math.floor(-oy / cellY) - 1, gy1 = Math.ceil((h - oy) / cellY) + 1;
+
+  for (let gy = gy0; gy < gy1; gy++) {
+    for (let gx = gx0; gx < gx1; gx++) {
+      const onFace = gx >= 0 && gx < NX && gy >= 0 && gy < NY;
+      let m = 0;
+      if (onFace) {
+        const sx = Math.min(MW-1, ((gx + 0.5) / NX * MW) | 0);
+        const sy = Math.min(MH-1, ((gy + 0.5) / NY * MH) | 0);
+        m = px_[(sy * MW + sx) * 4 + 3] / 255;
+      }
+
+      // Every cell is drawn, lit or not. An unlit dot is not absent — it is a dot
+      // with nothing behind it, a shade up from the black between dots. Skipping
+      // them leaves features floating in a void; drawing them puts the face on a
+      // panel, and the panel is most of why the reference reads as hardware.
+      //
+      // It goes straight to the output, not onto the layer the bloom reads. An
+      // unlit pixel emits nothing, so it must not glow — routed through the bloom
+      // the whole lattice lifts into a grey haze and the black dies.
+      // Same size as a lit dot. Shrinking these seemed right — an unlit emitter
+      // shows only its own body, not its bloom — but it reads as a second, finer
+      // grid sitting behind the first, because wider gaps are exactly what a
+      // smaller pitch looks like. It is one panel: a cell is the same cell whether
+      // or not there is anything behind it.
+      const x0 = edgeX(gx), y0 = edgeY(gy);
+      const dw = Math.max(1, edgeX(gx + 1) - x0 - GAP);
+      const dh = Math.max(1, edgeY(gy + 1) - y0 - GAP);
+
+      if (m < 0.06) {
+        fx.fillStyle = `rgba(126,148,184,${LATTICE})`;
+        fx.fillRect(x0, y0, dw, dh);
+        continue;
+      }
+
+      // Whole pixels here too — a half-pixel shear is drawn as a soft edge, which
+      // is the same uneven-gap artefact arriving by another route.
+      const amp = (0.4 + level * 2.0);
+      const jx = Math.round(Math.sin(gx * 0.3 + gy * 0.24 + t * (0.4 + level)) * amp * (1 - m * 0.8));
+      const jy = Math.round((hash(gx, gy) - 0.5) * amp * (1 - m * 0.8));
+      // A lit dot has to clear the lattice immediately. With nothing underneath, a
+      // 6%-coverage dot at low alpha still read against black; over a lattice it
+      // sinks into it, and the soft top and bottom of each eye — which is most of
+      // the eye's shape — dissolved. The ramp now starts high and moves less.
+      const a = (0.62 + 0.38 * m) * (0.84 + level * 0.16);
+
+      // These are the colours *before* two additive bloom passes land on top, so
+      // they have to sit well under the target. Measured on the canvas at the old
+      // values: green and blue were both pinned at 255 across the whole face, which
+      // leaves only red free to vary — which is exactly why it read as white with a
+      // cyan cast rather than as blue. Roughly 60% of the intended final value
+      // leaves the bloom somewhere to go.
+      const l = 30 + level * 4 + m * 26;
+      // Saturation eases off as a dot brightens so the top of the ramp goes icy
+      // rather than to a flat blue — but only part way. Pulling it to grey took the
+      // blue out of the face entirely.
+      const sa = Math.max(20, sat * (1 - m * 0.30));
+      dotsX.fillStyle = `hsla(${hue},${sa}%,${l}%,${a})`;
+      dotsX.fillRect(x0 + jx, y0 + jy, dw, dh);
+
+      // Fully covered dots emit hotter across their whole face. An inner square
+      // reads as a smaller bright pixel inside a dim one, which is not what an
+      // emitter does — it lights up all over.
+      if (m > 0.92) {
+        // Stops short of white on purpose: a pixel that reaches pure white has
+        // no colour left to say anything with, and the panel stops looking lit
+        // and starts looking blown.
+        dotsX.fillStyle = `hsla(${hue},${Math.max(22, sat * 0.70)}%,56%,${0.28 + level * 0.14})`;
+        dotsX.fillRect(x0 + jx, y0 + jy, dw, dh);
+      }
+    }
+  }
+
+  fx.drawImage(dotsC, 0, 0);
+
+  // Glow by downsampling and scaling back up rather than ctx.filter. The filter
+  // property is not dependable across webviews — it is why the packaged app had no
+  // glow at all while the browser did. This looks the same everywhere and is cheaper.
+  fx.save();
+  fx.globalCompositeOperation = 'lighter';
+  glowPass(w, h, 3,  0.62 + level * 0.18);   // tight halo around each pixel
+  glowPass(w, h, 9,  0.50 + level * 0.20);   // wide bloom into the surround
+  glowPass(w, h, 22, 0.30 + level * 0.16);   // the far, soft lift off the panel
+  fx.restore();
+
+  // grain over everything, shifted each frame so it crawls rather than sitting still
+  // `overlay` rather than `lighter`: overlay leaves near-black alone and only bites
+  // where there is already signal. Added flat, the same grain is a rounding error
+  // on a bright dot and a large modulation on a near-black gap, which is most of
+  // the mottling in the dark areas.
+  grainPat ??= fx.createPattern(grainC, 'repeat');
+  fx.save();
+  fx.globalCompositeOperation = 'overlay';
+  fx.globalAlpha = 0.085;
+  fx.translate((Math.random() * GRAIN) | 0, (Math.random() * GRAIN) | 0);
+  fx.fillStyle = grainPat;
+  fx.fillRect(-GRAIN, -GRAIN, w + GRAIN * 2, h + GRAIN * 2);
+  fx.restore();
+}
+
+// underdamped on purpose — zeta about 0.69, so it passes the target and comes back
+const S_pupil={v:0,vel:0}, S_pscale={v:1,vel:0};
+const S_hood={v:0,vel:0}, S_low={v:0,vel:0}, S_gape={v:1,vel:0};
+const S_lift={v:0,vel:0}, S_tilt={v:0,vel:0}, S_skew={v:0,vel:0},
+      S_mouth={v:1,vel:0}, S_open={v:0.94,vel:0};
+function sp(s, to, dt, k = 170, d = 18) {
+  s.vel += ((to - s.v) * k - s.vel * d) * dt;
+  s.v += s.vel * dt;
+}
+
+let rafHost = window;
+let lastT = performance.now(), histAt = 0;
+function faceLoop(now) {
+  if (now-lastT < ((talking || micLive) ? 32 : 48)) { rafHost.requestAnimationFrame(faceLoop); return; }
+  const dt = Math.min((now-lastT)/1000, 0.05); lastT = now;
+
+  // fast attack so a syllable shows immediately, slower release so it does not flicker
+  const raw = LEVEL_FIX ?? readLevel();
+  level += (raw - level) * (raw > level ? 0.55 : 0.12);
+  if (now - histAt > 45) { histAt = now; HIST.shift(); HIST.push(level); }
+
+  if (mood !== M.idle && mood !== M.ask && now-moodAt > 2600) setMood(M.idle);
+  // mouth 1.0 is exactly the curve in the design SVG, 0 is flat, -1 its mirror.
+  // pupil is where the bright band sits inside the eye: negative up, positive down.
+  // A raised pupil with a wide eye is attention; a dropped, thickened one is the
+  // unfocused stare of not following. It is the cheapest expressive channel on the
+  // face and it was sitting unused in the middle of every eye.
+  //                        mouth   lift   tilt   skew   eyes  pupil  scale   hood   low
+  if (mood===M.acted)      { set( 1.55,  0.20, -0.08, 0.00, 1.02, -0.06, 0.95,  0.00, 0.18); }  // pleased
+  // Laughing, near enough to crying. The lower lids are most of it: a smile that
+  // does not push the cheeks up is a smile someone is doing on purpose.
+  else if (mood===M.glad)  { set( 1.90,  0.34, -0.04, 0.00, 0.84, -0.12, 0.88,  0.12, 0.88); }
+  // Cross. Every channel pulling the same way — brows driven down at the inner
+  // ends, lids in from above and below, mouth turned over. One of them alone reads
+  // as a squint; it is the agreement that reads as anger.
+  else if (mood===M.cross) { set(-1.15, -0.60, -0.80, 0.00, 0.78,  0.06, 1.05,  0.40, 0.60); }
+  // Frightened. Wide eyes with the pupils shrunk into them, brows up and driven
+  // together at the inner ends, and a mouth that is open *and* turned down —
+  // which is the one thing the old mouth could not do at all.
+  else if (mood===M.scared){ set(-0.85,  0.72,  0.95, 0.00, 1.24,  0.00, 0.50,  0.00, 0.00, 0.88); }
+  // Rolling his eyes. One brow up and the other not, lids halfway, mouth gone
+  // flat — the face does very little and the gaze does the rest, which is the
+  // whole joke of an eye roll.
+  else if (mood===M.roll)  { set(-0.05, -0.12, -0.22, 0.62, 0.90, -0.34, 0.86,  0.24, 0.00); }
+  else if (mood===M.heard) { set( 1.00,  0.55,  0.00, 0.00, 1.18, -0.20, 0.78,  0.00, 0.00); }  // attentive
+  else if (mood===M.ask)   { set( 0.35,  0.30,  0.55, 0.50, 1.10, -0.14, 0.86,  0.00, 0.00); }  // quizzical
+  else if (mood===M.lost)  { set(-0.80,  0.12,  0.75, 0.00, 0.86,  0.22, 1.30,  0.06, 0.00); }  // puzzled
+  else                     { set( 1.00,  0.00,  0.00, 0.00, 0.96,  0.00, 1.00,  0.00, 0.00); }  // idle
+  // The idle cycle rides on top of the idle mood rather than replacing it, the
+  // same way the live read does: it is a drift, not a decision.
+  if (mood === M.idle) {
+    if (now - idleAt > IDLE[idleN].hold * 1000) {
+      idleAt = now;
+      idleN = (idleN + 1) % IDLE.length;
+    }
+    const P = IDLE[idleN];
+    idleAim = P.at;
+    mouthTo += P.m; liftTo += P.l; tiltTo += P.t; openTo += P.o - 1.0;
+    hoodTo += P.h; lowTo += P.w;
+  } else {
+    idleAim = 'away';
+    idleAt = now;
+  }
+  // An exponential glide always decelerates into its target and never passes it, which
+  // is why everything read as linear and weightless. A spring carries velocity: it
+  // overshoots a little and settles back, which is what makes a nod feel like mass
+  // moving rather than a value being interpolated.
+  // The live read is a bias on top of the mood, not a mood of its own. Moods are
+  // discrete and arrive with a decision; this is continuous and arrives mid-
+  // sentence, and the two have to be able to coexist — he can be pleased about the
+  // last thing while hearing something alarming in this one.
+  if (bias) {
+    // `now` here is the rAF timestamp, already milliseconds on the same clock as
+    // performance.now() — not seconds.
+    const age = (now - liveAt) / LIVE_DECAY;
+    const k = Math.max(0, 1 - age);
+    if (k <= 0) { bias = null; }
+    else {
+      const b = bias;
+      mouthTo += ((b.valence - 0.5) * 1.7 - b.trouble * 0.9) * k;
+      liftTo  += (b.surprising * 0.46 + b.asking * 0.12) * k;
+      tiltTo  += (b.asking * 0.42 + b.trouble * 0.40) * k;
+      skewTo  += (b.asking * 0.34) * k;
+      openTo  += (b.surprising * 0.20 - b.trouble * 0.10) * k;
+      // The pupil does the fast work: up and tight when something lands, dropped
+      // and slack when something is wrong. It is the part you read before the mouth.
+      pupilTo      += (-b.surprising * 0.17 - b.asking * 0.09 + b.trouble * 0.16) * k;
+      pupilScaleTo += (-b.surprising * 0.20 + b.trouble * 0.22) * k;
+      // Trouble narrows him from both sides at once, which is the difference
+      // between a worried face and a cross one. Only real delight reaches the
+      // lower lid otherwise.
+      hoodTo += (b.trouble * 0.26) * k;
+      lowTo  += (b.trouble * 0.30 + Math.max(0, b.valence - 0.80) * 1.4) * k;
+    }
+  }
+  // Attention, as a posture rather than an effect. Brows up, eyes a shade wider,
+  // pupils raised — the same three things his `heard` mood does, scaled by how
+  // loudly you are actually talking, so it arrives with a syllable and leaves with
+  // the silence. Fast to rise, slow to fall, or every gap between words is a twitch.
+  //
+  // Above the springs, not below them: the targets are rebuilt from the mood every
+  // frame, so anything added after they have been read is thrown away unused.
+  const wantHeard = (micLive && !micErr) ? Math.min(1, level * 2.4) : 0;
+  heard += (wantHeard - heard) * (1 - Math.exp(-dt / (wantHeard > heard ? 0.09 : 0.45)));
+  liftTo  += heard * 0.32;
+  openTo  += heard * 0.10;
+  pupilTo -= heard * 0.09;
+
+  sp(S_lift, liftTo, dt);  lift  = S_lift.v;
+  sp(S_tilt, tiltTo, dt);  tilt  = S_tilt.v;
+  sp(S_skew, skewTo, dt);  skew  = S_skew.v;
+  sp(S_mouth, mouthTo, dt); mouth = S_mouth.v;
+  sp(S_open, openTo, dt);  open  = S_open.v;
+  sp(S_pupil, pupilTo, dt);  pupil = S_pupil.v;
+  sp(S_pscale, pupilScaleTo, dt); pupilScale = S_pscale.v;
+  sp(S_hood, hoodTo, dt); hood = Math.max(0, S_hood.v);
+  sp(S_low, lowTo, dt);   low  = Math.max(0, S_low.v);
+  // Now that the mood, the idle pose and the live read have all had their say.
+  if (!gapeSet) gapeTo = Math.max(0, mouthTo);
+  // And while he is actually speaking, the mouth follows the words. Same envelope
+  // the bar in the capsule uses — vowels open it, stops close it, the pauses land
+  // on the spaces — so what you see and what you hear are the same sentence rather
+  // than a mouth flapping next to one.
+  if (talking) gapeTo = 0.22 + talkAmp * 1.25;
+  sp(S_gape, gapeTo, dt); gape = Math.max(0, S_gape.v);
+  // An eye roll is a path, not a place: up, across, and back down the other side.
+  // It overrides the saccade for as long as it lasts rather than fighting it.
+  if (mood === M.roll) {
+    const ph = Math.min(1, (now - moodAt) / 1000);
+    lookTo = { x: Math.sin(ph * Math.PI * 2) * 0.80, y: -0.95 + ph * 0.55 };
+    nextSac = now + 260;
+  }
+  else if (now > nextSac) {
+    // Where he is looking belongs to the pose. Fixed on you is small movements
+    // around centre and long gaps; looking about is wide and quick; bored is low
+    // and slow. All three used to be the same uniform random, which is why he
+    // always read as scanning whatever he was doing.
+    if (idleAim === 'you') {
+      lookTo = { x: (Math.random() - .5) * 0.34, y: (Math.random() - .5) * 0.22 };
+      nextSac = now + 1500 + Math.random() * 2200;
+    } else if (idleAim === 'down') {
+      lookTo = { x: (Math.random() - .5) * 0.8, y: 0.26 + Math.random() * 0.26 };
+      nextSac = now + 1800 + Math.random() * 2600;
+    } else {
+      lookTo = { x: (Math.random() - .5) * 1.6, y: (Math.random() - .5) * 0.9 };
+      nextSac = now + 700 + Math.random() * 1600;
+    }
+  }
+  look.x+=(lookTo.x-look.x)*(1-Math.exp(-dt/.06));
+  look.y+=(lookTo.y-look.y)*(1-Math.exp(-dt/.06));
+  if (now>nextBlink) { blink=1; nextBlink=now+2400+Math.random()*3600; }
+  blink = Math.max(0, blink-dt*7);
+  // Eyes closed while the microphone is off. Held down on the same lever a blink
+  // pulls rather than given a lid of its own: the brows already dip through a
+  // blink, and eyes that shut under brows that stay put read as broken rather
+  // than asleep. This is the only thing that says it now: there was a small muted
+  // microphone in the corner of his panel as well, and two ways of saying the same
+  // thing meant one of them was decoration.
+  // Only on his whole face, where nothing else says so. On the circles the strip
+  // under him spells MUTED, and two ways of saying one thing means one of them is
+  // decoration — here it was the worse one, because it held the lids down for as
+  // long as the microphone was off, which is most of the time.
+  shut += (((!eyesMode && document.body.classList.contains('muted')) ? 1 : 0) - shut)
+        * (1 - Math.exp(-dt / 0.14));
+  blink = Math.max(blink, shut);
+  // The screen changes at once — the shader takes one path or the other and half
+  // way between them is not a screen. The lamp does fade, over about the time it
+  // takes a cold cathode to come up, because that one is a real blend: the two
+  // ramps mix, so the green arrives rather than appearing.
+  lcd = lcdMode ? 1 : 0;
+  lamp += ((lampOn ? 1 : 0) - lamp) * (1 - Math.exp(-dt / 0.055));
+  drawWave(now / 1000, level, micLive && !micErr);
+  // Where in the sentence he is. If he outlasts the estimate he keeps a mid level
+  // rather than falling silent mid-word; the event, not the estimate, ends it.
+  let wantTalk = 0;
+  if (talking) {
+    const k = Math.floor((now - talkAt) / 1000 * TALK_CPS);
+    wantTalk = k < talkText.length ? loudness(talkText[k]) : 0.5;
+  }
+  talkAmp += (wantTalk - talkAmp) * (1 - Math.exp(-dt / 0.055));
+  if (talking || talkAmp > 0.004) drawMouth(now / 1000, talkAmp);
+  // The panel turns with his eyes, and leans in while you are talking.
+  //
+  // A head does not swivel its eyes alone: the gaze leads and the face follows,
+  // less than one to one. His panel *is* his face, so turning it is that same
+  // gesture — and it is the one that carries furthest, because the window moves.
+  //
+  // Both negated. Looking right turns his right edge away from you, which brings
+  // the left one closer, and that is a negative rotation about the vertical axis;
+  // looking up brings his chin nearer, which is the other one.
+  const TURN_X = 0.28, TURN_Y = 0.19, LEAN = 0.10;
+  const toX = -look.x * TURN_X;
+  const toY = -look.y * TURN_Y - heard * LEAN;
+  const kTurn = 1 - Math.exp(-dt / 0.17);      // the face lags the eyes, on purpose
+  tiltX += (toX - tiltX) * kTurn;
+  tiltY += (toY - tiltY) * kTurn;
+
+  if (!NATIVE) drawFace(now/1000);
+  rafHost.requestAnimationFrame(faceLoop);
+}
+function sizeFace() {
+  const win = fc.ownerDocument.defaultView || window;
+  const r = Math.min(win.devicePixelRatio || 1, 2);
+  let cw = fc.clientWidth, ch = fc.clientHeight;
+  if (!cw || !ch) { cw = win.innerWidth || 190; ch = win.innerHeight || 190; }
+  const w = Math.max(1, Math.round(cw * r)), h = Math.max(1, Math.round(ch * r));
+  if (fc.width !== w || fc.height !== h) { fc.width = w; fc.height = h; }
+}
+new ResizeObserver(sizeFace).observe(fc); addEventListener('resize', sizeFace); sizeFace();
+requestAnimationFrame(faceLoop);
+
+// --- the screen loop ---------------------------------------------------------
+//
+// Milind's shape: look at what is drawn, pick one thing, click it, look again, and
+// keep going until the goal is satisfied. What makes it terminate rather than run a
+// fixed number of clicks is asking "is this already achieved?" against the screen as
+// it is *now*, every step.
+//
+// Code owns the loop, the clicking and the stopping; the model only judges.
+
+const MAX_STEPS = 6;
+
+async function screenLoop(goal) {
+  for (let step = 0; step < MAX_STEPS; step++) {
+    let d;
+    try {
+      const r = await fetch('/api/screen/step', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal, first: step === 0, act: true }),
+      });
+      d = await r.json();
+      if (!r.ok) throw new Error(d.error ?? r.status);
+    } catch (e) {
+      setMood(M.lost); shake();
+      ev('err', `screen step ${step + 1}: ${String(e.message).slice(0, 90)}`);
+      return;
+    }
+
+    const n = `done ${Number(d.done).toFixed(2)} · p ${Number(d.p).toFixed(2)} · ${d.elements} on screen · ${d.ms}ms`;
+
+    if (step === 0 && d.isCommand !== null && d.isCommand < ACT_MIN) {
+      setMood(M.idle);
+      ev('ign', `<span class="n">${n}</span> → not for me`);
+      return;
+    }
+    if (d.done > 0.5) {
+      setMood(M.acted); nod();
+      ev('act', `<span class="n">${n}</span> → already done${step ? ` after ${step} step${step > 1 ? 's' : ''}` : ''}`);
+      return;
+    }
+    if (d.action === 'none' || !d.clicked) {
+      setMood(M.lost); shake();
+      ev('ign', `<span class="n">${n}</span> → nothing on screen matches`);
+      return;
+    }
+    flash(d.at);
+    setMood(M.heard);
+    ev('act', `step ${step + 1}: <b>${d.label}</b><br><span class="n">${n}</span>`);
+    await new Promise((r) => setTimeout(r, 450));   // let the screen settle before looking again
+  }
+  setMood(M.lost); shake();
+  ev('ign', `gave up after ${MAX_STEPS} steps`);
+}
+
+// --- Metal hand-off ----------------------------------------------------------
+//
+// Inside the desktop app the face is drawn by the GPU, on a layer behind this page,
+// so it can exceed the display's white. The webview keeps everything it is good at —
+// Jev, speech, the moods, the chrome — and just posts the rig's numbers across.
+// Pushed at 20 Hz rather than every frame: the shader animates time, wake and the
+// gesture decay itself, so the only thing crossing the bridge is state that changed.
+
+// Metal is the default wherever Tauri is reachable, which — since the remote-origin
+// capability went in for dragging — now includes this page served over http. That
+// was the blocker: without window.__TAURI__ the shader rendered a face that could
+// not react to anything. In a plain browser there is no Tauri and no EDR to have, so
+// the canvas runs. MIST_METAL=0 on the app forces the canvas too.
+const NATIVE = !!(window.__TAURI__ && window.__TAURI__.core)
+            && !new URLSearchParams(location.search).has('canvas');
+if (NATIVE) {
+  fc.style.display = 'none';                 // the canvas would cover the Metal layer
+  const invoke = window.__TAURI__.core.invoke;
+
+  // Settings drives the shader directly while it is open, and two writers would
+  // fight at 20 Hz. A heartbeat rather than a latch: if that window goes away
+  // without getting to say so, he comes back to life on his own rather than being
+  // left frozen on whatever the last slider happened to be.
+  let labAt = 0;
+  window.__TAURI__?.event?.listen?.('mist:lab', e => {
+    labAt = e.payload ? performance.now() : 0;
+  });
+
+  setInterval(() => {
+    const now = performance.now();
+    if (labAt && now - labAt < 2500) return;
+    const { hue, sat } = palette();
+    // The shader has to clip itself to the window's rounded rectangle, because it
+    // draws *behind* the webview where no CSS can reach it. Fractions rather than
+    // pixels so it does not need to know the backing scale.
+    // Measured, not derived. He used to be "the window minus 62px"; he is now a
+    // fixed square-ish panel with free space under him, and the shader has to clip
+    // itself to where he actually ends or it paints over that space.
+    const wh = window.innerHeight || 392, ww = window.innerWidth || 286;
+    const box = floatEl?.getBoundingClientRect();
+    const pw = box?.width || ww;
+    const faceH = box?.height || (pw * 1.1);
+    const top = box?.top || 0;
+    const tick = ticker(now);
+    invoke('set_face', { u: {
+      mouth, lift, tilt, skew, open, level, blink, pupil, pupilScale,
+      hue, sat: sat / 100,
+      nod: gesture(now, nodAt, 620, 2),
+      shake: gesture(now, shakeAt, 620, 2.5),
+      gaze: look.x, gazeY: look.y,
+      tiltX, tiltY,
+      lattice: LATTICE_METAL,
+      panelFrac: Math.max(0.1, Math.min(1, faceH / wh)),
+      panelWFrac: Math.max(0.1, Math.min(1, pw / ww)),
+      panelTopFrac: Math.max(0, Math.min(0.8, top / wh)),
+      // Two circles over his eyes, brows stroked and floating above them rather
+      // than cut out of the grid: at this size a brow built from cells is a
+      // staircase, and one clipped to the circles is half a brow.
+      mask: eyesMode ? 1 : 0,
+      // Smaller and closer than they were when they were the whole of him: with a
+      // case around them they have to leave a margin, and the gap between them is
+      // what the reference actually fixes — a little over four tenths of an eye.
+      eyeGrow: eyesMode ? 0.42 : 0,
+      // A whole number of cells apart — nineteen. The grid is snapped to device
+      // pixels, so where each eye falls between cells decides which of its outer
+      // dots light; at an arbitrary spread the two eyes land differently and one
+      // clips a crescent the other does not. 176/30 mask units per cell, and the
+      // pitch does not depend on the zoom.
+      // Forty-eight cells apart at the circles' own pitch, which is whole, so the
+      // two eyes fall the same way between cells and neither clips a crescent the
+      // other does not.
+      eyeSpread: eyesMode ? 0.0801 : 0,
+      lcd, lamp, gape, text: tick.text, textShift: tick.shift,
+      // Each lit by the thing its own button switches, so pressing one and
+      // watching it come on is the same gesture.
+      btn: [
+        lampOn ? 1 : 0,
+        (micLive && !micErr) ? Math.min(1, 0.55 + level * 1.6) : 0,
+        lcdMode ? 0.85 : 0,
+      ],
+      // Straight from the pose. These were derived — the top lid from how open he
+      // was, the bottom from how wide the smile was — which meant neither could
+      // ever be nothing at rest, and the lower one was up under both eyes every
+      // time he smiled, which is most of the time. An expression sets them now,
+      // and almost every expression sets them to nothing.
+      hood: Math.max(0, Math.min(1, hood + heard * 0.10)),
+      lidLow: Math.max(0, Math.min(0.95, low)),
+      smoothBrow: eyesMode ? 1 : 0,
+      zoom: eyesMode ? 0.84 : 0,
+      // The eye pair's own centre plus the mask's padding — not the middle of the
+      // drawing, which the eyes are not symmetric about.
+      // Mask units. The crop is centred on everything he now is on the circles —
+      // the top of the brows down through the bottom of the strip — rather than on
+      // the eyes alone, which is where it sat when the eyes were all there was.
+      focusX: 91.84, focusY: 179,
+      radiusFrac: 30 / pw,
+    } }).catch(() => {});
+  }, 50);
+}
+
+// --- float: drag + pop out ---------------------------------------------------
+
+const floatEl = document.getElementById('float'), grip = document.getElementById('grip');
+const fbody = document.getElementById('fbody');
+try { const p = JSON.parse(localStorage.getItem('mist.desk.pos')||'null');
+  if (p) { floatEl.style.left=p.x+'px'; floatEl.style.top=p.y+'px'; floatEl.style.right='auto'; }
+} catch {}
+let drag = null;
+grip.addEventListener('pointerdown', (e) => {
+  if (e.target.closest('button')) return;
+  const r = floatEl.getBoundingClientRect();
+  drag = { dx:e.clientX-r.left, dy:e.clientY-r.top, id:e.pointerId };
+  grip.setPointerCapture(e.pointerId); floatEl.classList.add('dragging');
+  floatEl.style.right = 'auto';
+});
+grip.addEventListener('pointermove', (e) => {
+  if (!drag || e.pointerId!==drag.id) return;
+  floatEl.style.left = Math.min(Math.max(0,e.clientX-drag.dx), innerWidth-floatEl.offsetWidth)+'px';
+  floatEl.style.top  = Math.min(Math.max(0,e.clientY-drag.dy), innerHeight-floatEl.offsetHeight)+'px';
+});
+function endDrag() {
+  if (!drag) return; drag = null; floatEl.classList.remove('dragging');
+  try { localStorage.setItem('mist.desk.pos',
+    JSON.stringify({x:floatEl.offsetLeft,y:floatEl.offsetTop})); } catch {}
+}
+grip.addEventListener('pointerup', endDrag); grip.addEventListener('pointercancel', endDrag);
+
+let pip = null;
+document.getElementById('pop').addEventListener('click', async () => {
+  if (!('documentPictureInPicture' in window)) { errEl.textContent='pop out needs Chrome 116+'; return; }
+  if (pip) { pip.close(); return; }
+  try {
+    pip = await documentPictureInPicture.requestWindow({ width:190, height:190 });
+    pip.document.head.innerHTML =
+      '<style>html,body{margin:0;height:100%;background:#04060a;overflow:hidden;'
+      + 'font:11.5px ui-monospace,SFMono-Regular,Menlo,monospace}'
+      + '.fbody{display:flex;flex-direction:column;height:100%;min-height:0}'
+      + 'canvas{display:block;width:100%;flex:1 1 auto;min-height:0}'
+      + 'input{flex:0 0 auto;width:100%;box-sizing:border-box;background:#090f18;border:0;'
+      + 'border-top:1px solid #141b27;color:#e6ecf6;padding:10px 13px;letter-spacing:-.005em;'
+      + 'font:500 14px/1.3 ui-rounded,\'SF Pro Rounded\',system-ui,-apple-system,sans-serif}'
+      + 'input::placeholder{color:#4a5a73;font-weight:450}'
+      + 'input:focus{outline:none;background:#0d1520}</style>';
+    pip.document.body.append(fbody);
+    document.body.classList.add('pip-host');
+    rafHost = pip;
+    new pip.ResizeObserver(sizeFace).observe(fc);
+    requestAnimationFrame(() => sizeFace());   // after the pip document lays out
+    pip.addEventListener('pagehide', () => {
+      floatEl.append(fbody);
+      document.body.classList.remove('pip-host'); pip=null; rafHost = window;
+      requestAnimationFrame(() => sizeFace());
+    });
+  } catch (e) { errEl.textContent = `pop out: ${e.name ?? e.message}`; pip = null; }
+});
+
+// A mic that silently does nothing is the worst failure mode here — you cannot tell
+// "not listening" from "not hearing you" from "heard you but ignored it". This line
+// separates all three: it shows the permission state, whether recognition is running,
+// the live level, and the words as they are recognised, before any decision happens.
+const micEl = document.getElementById('mic');
+// --- reacting while you are still talking -------------------------------------
+//
+// Everything else here waits for the sentence to finish, which means the face is
+// always a sentence behind — you say something and he answers the last thing. This
+// runs against the interim transcript instead, so the expression moves with the
+// sentence rather than after it.
+//
+// It reads and does nothing else: no tool, no click, no decision. Five questions,
+// ~150ms warm, and the answer is a bias laid over whatever mood he is already in,
+// decaying away over a few seconds so he drifts back rather than snapping.
+// --- acting before the sentence is over ---------------------------------------
+//
+// The interim transcript is already being read for the expression; it gets routed
+// as well. So "can you pull up slack and i want to send a message to jonathan
+// saying…" has Slack open by about the ninth word — before you have said
+// "message" — because the router settles on the desktop tool there and that tool
+// is reversible.
+//
+// Two rules keep this from being reckless:
+//
+//   Only prefetchable tools run early. Switching apps is instant and undone by
+//   switching back. Nothing that writes anything is marked prefetchable, so a
+//   half-heard sentence can open something but can never send, post or delete.
+//
+//   The decision has to have stopped moving. A three-word fragment routes almost
+//   randomly — "can you pull" came back as `prs` — so nothing fires until the same
+//   tool has been chosen twice running, and then only once per utterance.
+const ROUTE_GAP = 700;
+// Same bar the reference implementation uses, and the measurements agree with it.
+const COMPLETE_MIN = 0.6;
+let routeSent = 0, routeTool = null, routeStable = 0, prefetched = null, draftRow = null;
+
+function resetRoute() {
+  routeTool = null; routeStable = 0; prefetched = null;
+  if (draftRow) { draftRow.remove(); draftRow = null; }
+}
+
+async function routeLive(text) {
+  const now = performance.now();
+  if (busy || now - routeSent < ROUTE_GAP || text.length < 8) return;
+  routeSent = now;
+  let d;
+  try { d = await ask({ text, partial: true }); } catch { return; }
+
+  const tool = d.tool ?? (d.kind === 'chatter' ? 'chatter' : 'none');
+  routeStable = tool === routeTool ? routeStable + 1 : 0;
+  routeTool = tool;
+
+  // Act on a half-spoken sentence only when the half already stands on its own.
+  //
+  // "go back" is a whole instruction at two words and waiting for silence is pure
+  // latency — this is the difference between a thing that responds and a thing that
+  // waits for you to stop talking. "go back to the" is the same two words plus the
+  // start of something else, and acting there picks a control for a request nobody
+  // finished making. Measured: 0.76 against 0.06 for exactly that pair.
+  //
+  // Below the line he still gets the app switch, which is free to undo. Above it he
+  // does the whole thing, mid-sentence.
+  if (d.prefetch && routeStable >= 1 && prefetched !== tool && !busy) {
+    prefetched = tool;
+    const whole = (d.complete ?? 0) > COMPLETE_MIN;
+    if (d.handoff === 'drive') driveDecide(text, !whole).catch(() => {});
+    if (whole) { lastSaid = text; }        // the final transcript must not repeat it
+  }
+
+  // A write in progress shows what it is collecting, and keeps showing it as the
+  // rest of the sentence arrives. It is a preview, not a pending action — there is
+  // no token behind it and nothing to say yes to until you stop talking.
+  if (d.draft && d.args) {
+    const shown = Object.entries(d.args).filter(([, v]) => v)
+      .map(([k, v]) => `${k}: ${v}`).join('\n');
+    if (!shown) return;
+    if (!draftRow) draftRow = ev('ask', '');
+    draftRow.innerHTML = `<span class="n">${esc(d.label)} · still listening…</span>`
+      + `<div class="say">${esc(shown)}</div>`;
+  }
+}
+
+const LIVE_GAP = 420, LIVE_DECAY = 3000;
+
+// ?say=... runs a sentence through the live read on load, and window.__say(text)
+// does it on demand. The whole live layer is otherwise only observable by speaking
+// into a microphone, which makes it impossible to look at while tuning and is why
+// it went this long without anyone actually watching it work.
+window.__say = (t) => { liveSent = 0; liveText = ''; return readLive(t); };
+addEventListener('load', () => {
+  const q = new URLSearchParams(location.search).get('say');
+  if (q) setTimeout(() => readLive(q), 900);
+});
+let liveAt = -9e9, liveSent = 0, liveText = '', bias = null;
+
+async function readLive(text) {
+  const now = performance.now();
+  // Only worth asking again once there is meaningfully more sentence to read.
+  if (now - liveSent < LIVE_GAP || text.length < 6 || text === liveText) return;
+  liveSent = now; liveText = text;
+  try {
+    const r = await fetch('/api/live', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) })
+      .then((x) => x.json());
+    if (r.error) return;
+    bias = { valence: r.dims.valence.v, force: r.dims.force.v,
+             asking: r.flags.asking, surprising: r.flags.surprising, trouble: r.flags.trouble };
+    // Two faces the live read can reach on its own, because both are about what
+    // you just said rather than about anything he did. They need agreement from
+    // two questions each: something good is not delight unless it also matters,
+    // and something wrong is not anger unless it also matters. Either one alone
+    // is an ordinary day.
+    if (bias.valence > 0.86 && bias.force > 0.60) setMood(M.glad);
+    // Something wrong that he did not see coming is fright; something wrong he did
+    // is temper. The surprise is the whole difference between the two.
+    else if (bias.trouble > 0.72 && bias.surprising > 0.62) setMood(M.scared);
+    // Asked something that plainly does not matter. The two together are the
+    // point: a question on its own is just a question.
+    else if (bias.asking > 0.70 && bias.force < 0.22) setMood(M.roll);
+    else if (bias.trouble > 0.80 && bias.force > 0.62) setMood(M.cross);
+    liveAt = performance.now();
+    if (typeof latEl !== 'undefined') latEl.textContent = `${r.ms}ms live`;
+    window.__lastLive = bias;
+  } catch { /* a dropped live read is not worth surfacing */ }
+}
+
+let micState = 'off', micErr = '', interim = '';
+// Whether the microphone is actually engaged, as a fact rather than as something
+// inferred from the wording of a status line.
+let micLive = false;
+
+async function permState() {
+  try { return (await navigator.permissions.query({ name: 'microphone' })).state; }
+  catch { return 'unknown'; }
+}
+function paintMic() {
+  const lit = level > 0.02;
+  // Muted means not actually listening — off, starting, or errored. The pill's own
+  // button lights up when it is on, but that is below him and only visible on
+  // hover; this is on his face, where you are already looking.
+  // The glyph follows micLive, not the text of micState.
+  //
+  // It used to match /^(listening|hearing)/ against the status string, which missed
+  // two states where the microphone is plainly on: "on (granted)", set by the
+  // permission promise — which can resolve *after* recognition has already started
+  // and overwrite "listening" — and "restarting", which the keepalive passes
+  // through constantly. So his eyes stayed shut while he was listening.
+  document.body.classList.toggle('muted', !micLive || !!micErr);
+  micEl.className = micErr ? 'perm bad' : 'perm';
+  micEl.innerHTML = micErr
+    ? `mic: <b>${micErr}</b>`
+    : `mic: <b>${micState}</b> · level <span class="lvl">${level.toFixed(2)}</span>`
+      + `${lit ? ' ●' : ' ○'}${interim ? ` · “${interim.slice(-60)}”` : ''}`;
+}
+setInterval(paintMic, 100);
+
+// --- the loop ----------------------------------------------------------------
+
+async function controls() {
+  const r = await fetch('/api/desktop/controls', { method:'POST' });
+  return r.json();
+}
+async function act(id) {
+  const r = await fetch('/api/desktop/act', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({ id }) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error ?? r.status);
+  return d.done;
+}
+
+(async () => {
+  try {
+    const { controls: c, accessibility } = await controls();
+    permEl.className = accessibility ? 'perm' : 'perm bad';
+    permEl.textContent = accessibility
+      ? `can reach ${c.length} things — apps, Chrome tabs, and the frontmost app's menus`
+      : `${c.length} things — apps and Chrome tabs only. Menus need Accessibility: `
+        + `System Settings › Privacy & Security › Accessibility.`;
+  } catch (e) { permEl.className='perm bad'; permEl.textContent = 'proxy not reachable'; }
+})();
+
+let busy = false, lastSaid = '';
+
+// What the assistant last asked, so the next utterance can be understood as the
+// answer to it rather than as a fresh command. Jev decides which it is.
+let pending = null;
+
+const meter = (d) => {
+  if (d.usage?.input_tokens == null) return;
+  decisions++; inTokens += d.usage.input_tokens;
+  const spend = inTokens * USD_PER_INPUT_TOKEN;
+  latEl.textContent = `${d.jevMs ?? d.ms}ms`;
+  costEl.textContent = `${decisions} decision${decisions===1?'':'s'} · `
+    + `$${(spend/decisions).toFixed(6)} each · $${spend.toFixed(5)} total`;
+};
+
+const ask = (body) => fetch('/api/ask', { method:'POST',
+  headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) })
+  .then(async (r) => { const d = await r.json(); if (!r.ok) throw new Error(d.error ?? r.status); return d; });
+
+// ---------------------------------------------------------------------------
+// The panel beside him.
+//
+// Some answers are a shape before they are a sentence. A forecast read out as
+// "high 86, low 59, 45% chance of rain" is four numbers to hold; the same thing as
+// an icon and a temperature is one glance. So he widens by exactly one more panel
+// and draws it on the lattice he is already drawn on, which is why it reads as him
+// showing you something rather than as a popover.
+//
+// The card is the page's, not the shader's: there is one face in that shader and
+// this is not a face. The shader is told to stop at half the window instead.
+const cardC = document.getElementById('card');
+const cardX = cardC.getContext('2d');
+const cardBlur = document.createElement('canvas');
+const cardBlurX = cardBlur.getContext('2d');
+let shown = null, cardTimer = 0;
+// One panel, in CSS pixels. Tracked rather than derived so a resize while a card is
+// open does not halve him on the next answer.
+let panelW = window.innerWidth;
+addEventListener('resize', () => {
+  panelW = window.innerWidth / (shown ? 2 : 1);
+  if (shown) drawCard();
+});
+
+// Head band, panel, and the strip of controls under it — the last measured once
+// at his design size and kept as a fraction, so every shape he takes is the same
+// shape scaled.
+const BAND = 0.783;
+async function reshape() {
+  if (!NATIVE) return;
+  const ph = eyesMode ? 1.60 : 1.10;
+  // The band under him holds the bar and the text field — except on the circles,
+  // where both sit on him and all that is left down there is air.
+  // Room under the case for the bar and the text field, which sit below him now
+  // rather than on him.
+  const band = eyesMode ? 0.34 : BAND;
+  try {
+    await window.__TAURI__.core.invoke('set_shape', {
+      width: panelW * (shown ? 2 : 1),
+      height: Math.round(panelW * (0.55 + ph + band)),
+    });
+  } catch { /* a refused resize is not worth losing the answer over */ }
+}
+
+// Which shape his screen is. The menu decides; the page owns the geometry, so it
+// is the page that tells the shader.
+let eyesMode = false;
+// window.__TAURI__ rather than the TAURI const: this block sits above where that
+// const is declared, and reaching it from here throws on evaluation — which kills
+// the rest of the module, including the face loop, with an error pointing at a
+// completely unrelated line.
+window.__TAURI__?.event?.listen?.('mist:eyes', (e) => {
+  eyesMode = !!e.payload;
+  document.documentElement.classList.toggle('eyes', eyesMode);
+  reshape();
+});
+
+// The strip under his eyes, and what it is reading out.
+//
+// Six cells of three-by-five glyphs, sent as indices into the shader's own font.
+// The words are the page's business and the shapes are the shader's, and neither
+// has to know how the other spells — which is also why this is not a string: a
+// uniform is a number, and six numbers is the whole protocol.
+const GLYPHS = ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.:-';
+const SLOTS = 12, SEEN = 9;               // twelve sent, nine across the strip
+
+function glyphs(str, from = 0, off = 0) {
+  const t = new Array(SLOTS).fill(0);
+  for (let i = 0; i < SLOTS - off; i++) {
+    const g = GLYPHS.indexOf(str[from + i] ?? ' ');
+    if (g > 0) t[off + i] = g;
+  }
+  return t;
+}
+
+function readout(word) {
+  const w = String(word).toUpperCase().slice(0, SEEN);
+  // Centred across what you can see, not across what is sent. A five-letter word
+  // hard against the left of the strip reads as a word that did not fit.
+  return glyphs(w, 0, Math.floor((SEEN - w.length) / 2));
+}
+
+// A ticker while he talks.
+//
+// The display is the only part of him that can say *what* he is saying rather than
+// that he is saying something, and a line of text that appears all at once is a
+// label. This scrolls: the page keeps the whole sentence, sends the twelve
+// characters nearest the window and how far between two of them it is, and the
+// shader slides the grid by that. Seven a second rather than the fifteen and a
+// half he actually reads at — a ticker is for reading, and his voice is already
+// carrying the pace.
+const TICK_CPS = 5;
+let tickMsg = '', tickAt = 0;
+function ticker(now) {
+  const live = talking && talkText ? '   ' + talkText.toUpperCase() + '        ' : '';
+  if (live !== tickMsg) { tickMsg = live; tickAt = now; }
+  if (!live) return { text: readout(stateWord()), shift: 0 };
+  const pos = Math.max(0, (now - tickAt) / 1000 * TICK_CPS);
+  const i = Math.floor(pos);
+  if (i >= live.length) return { text: readout(stateWord()), shift: 0 };
+  return { text: glyphs(live, i), shift: (pos - i) * 8 };   // eight cells a character
+}
+
+/// What he is doing, in six characters or fewer.
+///
+/// Ordered by what would interrupt what: he cannot be listening while he is
+/// talking, and the microphone being off outranks both because it is the one state
+/// you might not have chosen.
+function stateWord() {
+  if (document.body.classList.contains('muted')) return 'MUTED';
+  if (talking) return 'TALKS';
+  if (mood === M.ask) return 'THINKS';
+  if (micLive && !micErr) return level > 0.10 ? 'HEARS' : 'LISTEN';
+  return 'READY';
+}
+
+// Which kind of screen he is, and whether there is a lamp behind it.
+//
+// Not a palette swap. Everything else about him assumes light comes out: a lit cell
+// is bright, it blooms, and its core goes past white where the display has the
+// headroom for it. A reflective panel is the other way round — the cell that is on
+// is the one that has gone dark, and the brightest thing on him is the glass doing
+// nothing. The shader owns that inversion; these two only say which screen and
+// whether the lamp is on.
+let lcdMode = false, lampOn = false;
+let lcd = 0, lamp = 0;
+// Being thrown across the desk, and hitting something.
+//
+// The physics lives in Rust and the face lives here, so the two only meet through
+// these: launched is a fright, and every wall after that is an indignity. Both
+// lapse back to idle on the usual timer, so a long glide ends with him composed.
+window.__TAURI__?.event?.listen?.('mist:thrown', () => { setMood(M.scared); });
+window.__TAURI__?.event?.listen?.('mist:bump', () => { setMood(M.cross); shake(); });
+// What he is saying, for the readout to scroll — sent by whoever asked him to say
+// it rather than by the one path that used to know.
+window.__TAURI__?.event?.listen?.('mist:said', (e) => { talkText = String(e.payload ?? ''); });
+window.__TAURI__?.event?.listen?.('mist:lcd', () => { lcdMode = !lcdMode; });
+window.__TAURI__?.event?.listen?.('mist:lamp', () => { lampOn = !lampOn; });
+
+async function showCard(c) {
+  clearTimeout(cardTimer);
+  if (!c || c.kind !== 'weather') { hideCard(); return; }
+  shown = weatherCard(c);
+  document.documentElement.classList.add('card');
+  await reshape();
+  drawCard();
+  // It is an answer, not a dashboard. It goes when the answer has been read.
+  cardTimer = setTimeout(hideCard, 45000);
+}
+
+async function hideCard() {
+  clearTimeout(cardTimer);
+  if (!shown) return;
+  shown = null;
+  document.documentElement.classList.remove('card');
+  await reshape();
+}
+
+/// The same dot pass his face gets, on the same lattice, at the same pitch — the
+/// two panels have identical dimensions, so the identical fit puts every cell of
+/// this one in register with every cell of his.
+function drawCard() {
+  if (!shown) return;
+  const r = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(1, Math.round(cardC.clientWidth * r));
+  const h = Math.max(1, Math.round(cardC.clientHeight * r));
+  if (cardC.width !== w || cardC.height !== h) { cardC.width = w; cardC.height = h; }
+  if (cardBlur.width !== w || cardBlur.height !== h) { cardBlur.width = w; cardBlur.height = h; }
+
+  const { hue, sat } = palette();
+  cardX.fillStyle = '#04060a';
+  cardX.fillRect(0, 0, w, h);
+  cardBlurX.clearRect(0, 0, w, h);
+
+  const fit = Math.min(w * 0.94 / MW, h * 0.86 / MH);
+  const fw = MW * fit, fhh = MH * fit;
+  const cellX = fw / NX, cellY = fhh / NY, cell = Math.min(cellX, cellY);
+  const ox = (w - fw) / 2, oy = (h - fhh) / 2;
+  const GAP = Math.max(1, Math.round(cell * 0.14));
+  const edgeX = (g) => Math.round(ox + g * cellX);
+  const edgeY = (g) => Math.round(oy + g * cellY);
+
+  const gx0 = Math.floor(-ox / cellX) - 1, gx1 = Math.ceil((w - ox) / cellX) + 1;
+  const gy0 = Math.floor(-oy / cellY) - 1, gy1 = Math.ceil((h - oy) / cellY) + 1;
+
+  for (let gy = gy0; gy < gy1; gy++) {
+    for (let gx = gx0; gx < gx1; gx++) {
+      const on = gx >= 0 && gx < shown.cols && gy >= 0 && gy < shown.rows;
+      const m = on ? shown.cells[gy * shown.cols + gx] : 0;
+      const x0 = edgeX(gx), y0 = edgeY(gy);
+      const dw = Math.max(1, edgeX(gx + 1) - x0 - GAP);
+      const dh = Math.max(1, edgeY(gy + 1) - y0 - GAP);
+      if (m < 0.06) {
+        cardX.fillStyle = `rgba(126,148,184,${LATTICE})`;
+        cardX.fillRect(x0, y0, dw, dh);
+        continue;
+      }
+      const a = 0.62 + 0.38 * m;
+      const l = 30 + m * 26;
+      const sa = Math.max(20, sat * (1 - m * 0.30));
+      cardBlurX.fillStyle = `hsla(${hue},${sa}%,${l}%,${a})`;
+      cardBlurX.fillRect(x0, y0, dw, dh);
+      if (m > 0.92) {
+        cardBlurX.fillStyle = `hsla(${hue},${Math.max(22, sat * 0.70)}%,56%,0.20)`;
+        cardBlurX.fillRect(x0, y0, dw, dh);
+      }
+    }
+  }
+
+  cardX.drawImage(cardBlur, 0, 0);
+  // Two passes rather than his three: a card is read, and the far soft lift that
+  // makes his face look lit makes small type look damp. Weaker than his, too — he
+  // is drawn by the shader with headroom above white and this is not, so matching
+  // his numbers here does not match his brightness, it just runs out of colour.
+  cardX.save();
+  cardX.globalCompositeOperation = 'lighter';
+  for (const [div, alpha] of [[3, 0.40], [10, 0.24]]) {
+    const bw = Math.max(1, Math.round(w / div)), bh = Math.max(1, Math.round(h / div));
+    const tmp = document.createElement('canvas');
+    tmp.width = bw; tmp.height = bh;
+    const tx = tmp.getContext('2d');
+    tx.imageSmoothingEnabled = true;
+    tx.drawImage(cardBlur, 0, 0, bw, bh);
+    cardX.globalAlpha = alpha;
+    cardX.drawImage(tmp, 0, 0, w, h);
+  }
+  cardX.restore();
+}
+
+repaintCard = () => { if (shown) drawCard(); };
+
+/// Where he clicked, drawn in his own pixels for half a second.
+///
+/// The proxy hands the point back with the sentence because nothing on this side
+/// knows it: the accessibility path presses an element, not a coordinate, and the
+/// element's frame is only known over there.
+function flash(at) {
+  if (!NATIVE || !Array.isArray(at)) return;
+  const [x, y] = at;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  window.__TAURI__.core.invoke('flash_cursor', { x, y }).catch(() => {});
+}
+
+// ---------------------------------------------------------------------------
+// A call, not a toggle.
+//
+// Turning the microphone on used to change a colour. Two square-wave notes up on
+// connect and down on hang-up, and the level bars moving while it is open, is the
+// vocabulary every phone has used for forty years — you know which one happened
+// without looking at the screen.
+let ac = null;
+function blip(up) {
+  try {
+    ac ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state === 'suspended') ac.resume();
+    const notes = up ? [587.33, 880] : [587.33, 392];
+    notes.forEach((hz, i) => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'square';                       // old hardware, on purpose
+      o.frequency.value = hz;
+      const t = ac.currentTime + i * 0.085;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.05, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.075);
+      o.connect(g).connect(ac.destination);
+      o.start(t); o.stop(t + 0.1);
+    });
+  } catch { /* no audio context is not a reason to fail to listen */ }
+}
+
+// The five bars, driven by the microphone. Each has its own phase so they do not
+// pump as one block, and a floor so the shape stays a shape at silence.
+const waveEl = document.getElementById('wave');
+const bars = waveEl ? [...waveEl.querySelectorAll('line')] : [];
+const BAR_REST = [5, 10, 15, 10, 5];
+function drawWave(t, lvl, live) {
+  if (!bars.length) return;
+  bars.forEach((ln, i) => {
+    const rest = BAR_REST[i];
+    const h = live
+      ? rest * (0.42 + 1.05 * lvl * (0.55 + 0.45 * Math.sin(t * 7 + i * 1.7)))
+      : rest;
+    const half = Math.max(1.2, Math.min(9.5, h / 2));
+    ln.setAttribute('y1', (12 - half).toFixed(2));
+    ln.setAttribute('y2', (12 + half).toFixed(2));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// The other wave: his, not yours.
+//
+// The five bars above are a picture of what the microphone is hearing. These are a
+// picture of what he is saying, and they take the whole capsule while he says it.
+// Fifteen of them, tallest in the middle and tapering out, which is the shape a
+// row of bars has to have to read as a mouth rather than as a meter.
+const mouthEl = document.getElementById('mouthwave');
+const MBARS = 15;
+const mbars = [];
+if (mouthEl) {
+  for (let i = 0; i < MBARS; i++) {
+    const ln = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+    const x = (2 + i * (72 / (MBARS - 1))).toFixed(3);
+    ln.setAttribute('x1', x); ln.setAttribute('x2', x);
+    ln.setAttribute('y1', '17.2'); ln.setAttribute('y2', '18.8');
+    mouthEl.appendChild(ln);
+    mbars.push(ln);
+  }
+}
+
+let talking = false, talkText = '', talkAt = 0, talkAmp = 0;
+
+/// Loud where a voice is loud.
+///
+/// NSSpeechSynthesizer will not tell you how loud it is being, and it does not need
+/// to: the sentence is right here. Stepping through the characters at the rate he
+/// reads them is a better envelope than a meter would be, because the pauses land
+/// on the spaces and the punctuation instead of wherever a smoothing constant put
+/// them. Vowels open a mouth; stops close it.
+function loudness(ch) {
+  if (!ch) return 0;
+  if (ch === ' ' || ch === '\t' || ch === '\n') return 0.05;
+  if (',.;:!?—'.indexOf(ch) >= 0) return 0.02;
+  if ('aeiouyAEIOUY'.indexOf(ch) >= 0) return 1.0;
+  if ('mnlrwvzjMNLRWVZJ'.indexOf(ch) >= 0) return 0.60;
+  return 0.32;
+}
+
+const TALK_CPS = 15.5;            // characters a second, at the rate Zarvox reads
+
+function drawMouth(t, amp) {
+  if (!mbars.length) return;
+  const mid = (MBARS - 1) / 2;
+  for (let i = 0; i < MBARS; i++) {
+    // One shape, not fifteen meters: a taper across the row so the ends stay
+    // shorter than the middle, and a phase offset per bar so the wave travels
+    // along it instead of the whole row pumping together.
+    const shape = 0.20 + 0.80 * Math.cos((i - mid) / mid * 1.30);
+    const wob = 0.66 + 0.34 * Math.sin(t * 11 + i * 0.85);
+    const half = Math.max(1.4, Math.min(15.2, 1.4 + 14.4 * amp * shape * wob));
+    mbars[i].setAttribute('y1', (18 - half).toFixed(2));
+    mbars[i].setAttribute('y2', (18 + half).toFixed(2));
+  }
+}
+
+// Rust watches the synthesizer and says when it starts and stops. Sixty-four
+// milliseconds of granularity, which is finer than an ear can place the start of a
+// sentence and far finer than the fade.
+window.__TAURI__?.event?.listen?.('mist:talking', (e) => {
+  talking = !!e.payload;
+  if (talking) talkAt = performance.now();
+  document.body.classList.toggle('talking', talking);
+});
+
+// ---------------------------------------------------------------------------
+// His voice. The oldest one macOS still ships, because a robot that sounds like a
+// robot is the point — a natural voice here would be a different character.
+let robot = null;
+function pickVoice() {
+  const all = speechSynthesis.getVoices?.() ?? [];
+  for (const name of ['Zarvox', 'Trinoids', 'Albert', 'Ralph', 'Fred', 'Junior']) {
+    const v = all.find((v) => v.name === name);
+    if (v) return v;
+  }
+  return all.find((v) => (v.lang || '').startsWith('en')) ?? null;
+}
+try {
+  robot = pickVoice();
+  speechSynthesis.addEventListener('voiceschanged', () => { robot = pickVoice(); });
+} catch { /* no speech synthesis: he stays quiet */ }
+
+function say(text) {
+  if (!text) return;
+  const line = String(text).slice(0, 260);
+  talkText = line;                            // what the bars are going to step through
+  // In the app it goes through AppKit. Inside a WKWebView getVoices() returns an
+  // empty list — measured, not assumed — so every word he has ever said came out in
+  // the system default voice while the robot he was meant to be stayed unreachable.
+  // The classic voices are all installed; they are just not offered to web content.
+  if (NATIVE) {
+    window.__TAURI__.core.invoke('speak', { text: line }).catch(() => {});
+    return;
+  }
+  try {
+    speechSynthesis.cancel();                 // a newer answer replaces an older one
+    const u = new SpeechSynthesisUtterance(line);
+    if (robot) u.voice = robot;
+    u.rate = 1.0;
+    u.pitch = 0.75;
+    // The app hears about this from Rust watching the synthesizer; in a browser the
+    // utterance says so itself.
+    u.onstart = () => { talking = true; talkAt = performance.now();
+      document.body.classList.add('talking'); };
+    u.onend = u.onerror = () => { talking = false;
+      document.body.classList.remove('talking'); };
+    speechSynthesis.speak(u);
+  } catch { /* ditto */ }
+}
+
+const thinkEl = document.getElementById('think');
+const bubEl = document.getElementById('bub');
+let thinkTimer = 0;
+
+/// One thing at a time, above his head, gone when it has been read.
+function think(text, source) {
+  clearTimeout(thinkTimer);
+  if (!text) { thinkEl.classList.remove('on'); return; }
+  bubEl.innerHTML = esc(text)
+    + (source ? `<span class="src">${esc(source)}</span>` : '');
+  thinkEl.classList.add('on');
+  // Long enough to read twice, and it can always be dismissed sooner.
+  const ms = 4000 + Math.min(9000, String(text).length * 55);
+  thinkTimer = setTimeout(() => thinkEl.classList.remove('on'), ms);
+}
+bubEl.addEventListener('click', () => { clearTimeout(thinkTimer);
+  thinkEl.classList.remove('on'); });
+
+function answer(said, d, note) {
+  showCard(d.card ?? null);
+  say(d.reply);
+  think(d.reply, d.source);
+  const row = ev('ans', `<b>\u201c${esc(said)}\u201d</b><br><span class="n">${esc(note)}</span>`
+    + `<div class="say">${esc(d.reply)}</div>`
+    + (d.source ? `<div class="src">${esc(d.source)}</div>` : ''));
+  return row;
+}
+
+// Everything starts here. One request routes the utterance and fills every
+// candidate tool's arguments at once; only the winner's are read. A desktop
+// command hands off to the older path below, whose Choice is built from controls
+// that only exist at click time and so cannot join the speculative set.
+async function decide(said) {
+  if (busy || !said.trim() || said === lastSaid) return;
+  busy = true; lastSaid = said;
+  try {
+    const d = await ask({ text: said, question: pending?.question ?? null });
+    meter(d);
+    const note = `${d.kind} \u00b7 addressed ${(d.addressed ?? 0).toFixed(2)} \u00b7 ${d.used}/${d.asked} asked \u00b7 ${d.jevMs}ms`;
+
+    if (d.kind === 'chatter') {
+      setMood(M.idle);
+      ev('ign', `<b>\u201c${esc(said)}\u201d</b><br><span class="n">${esc(note)}</span> \u2192 not for me`);
+    } else if (d.kind === 'cancel') {
+      pending = null; setMood(M.idle);
+      ev('ign', `<b>\u201c${esc(said)}\u201d</b><br><span class="n">${esc(note)}</span> \u2192 cancelled`);
+    } else if (d.kind === 'answers_previous' && pending?.confirm) {
+      const token = pending.confirm; pending = null;
+      const done = await ask({ confirm: token });
+      setMood(M.acted); nod();
+      answer(said, done, note);
+    } else if (d.kind === 'woken') {
+      // His name and nothing else. He answers the way a person does when called
+      // from across a room: looks up, says yes, waits.
+      pending = null; setMood(M.ask);
+      answer(said, d, note);
+    } else if (d.handoff === 'drive') {
+      await driveDecide(said);
+    } else if (d.confirm) {
+      // A write. Show exactly what will happen and wait for a yes — by button or
+      // by voice, which is why the question is held rather than the arguments.
+      setMood(M.ask);
+      pending = { question: d.reply, confirm: d.confirm };
+      const row = answer(said, d, note);
+      const go = document.createElement('div'); go.className = 'go';
+      const yes = document.createElement('button'); yes.textContent = 'do it';
+      const no = document.createElement('button'); no.textContent = 'no';
+      go.append(yes, no); row.append(go);
+      yes.onclick = async () => {
+        go.remove(); const token = pending?.confirm; pending = null;
+        try { const done = await ask({ confirm: token });
+              row.querySelector('.say').textContent = done.reply; setMood(M.acted); nod(); }
+        catch (e) { row.className = 'ev err'; row.append(document.createTextNode(' ' + e.message)); } };
+      no.onclick = () => { go.remove(); pending = null; row.className = 'ev ign'; setMood(M.idle); };
+    } else if (d.reply) {
+      pending = null;
+      setMood(d.tool ? M.acted : M.lost); if (d.tool) nod(); else shake();
+      answer(said, d, note);
+    } else {
+      setMood(M.idle);
+    }
+    errEl.textContent = '';
+  } catch (e) {
+    errEl.textContent = String(e.message ?? e).slice(0, 70);
+    ev('err', `<b>\u201c${esc(said)}\u201d</b><br>${esc(String(e.message ?? e).slice(0,110))}`);
+    lastSaid = '';
+  } finally { busy = false; }
+}
+
+// --- the accessibility loop ---------------------------------------------------
+//
+// What the drive loop cannot do. "Open slack to the chat with roman" brings Slack
+// forward and stops there, because the drive loop knows apps, tabs and menu items,
+// and a sidebar conversation is none of those. The accessibility tree has every one
+// of them by name.
+//
+// Run after any app switch. The first question it asks is whether the goal is
+// already met, so when "open slack" really was the whole request this costs one
+// call and does nothing — which is the right price for not having to know in
+// advance which it was.
+const AX_STEPS = 4;
+
+async function axLoop(goal, app = null) {
+  let acted = false;
+  for (let step = 0; step < AX_STEPS; step++) {
+    let d;
+    try {
+      d = await fetch('/api/ax/step', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ goal, app, act: true }) }).then((r) => r.json());
+    } catch { return acted; }
+    if (d.error || !d.controls) return acted;    // nothing exposed: leave it alone
+
+    if (d.done > 0.5) { if (step > 0) { setMood(M.acted); nod(); } return acted; }
+    if (d.action === 'none' || d.confidence < CONF_MIN) return acted;
+    if (!d.pressed) return acted;
+    acted = true;
+    flash(d.at);
+
+    ev('act', `<span class="n">${esc(d.app)} \u00b7 ${d.controls} controls</span>`
+      + `<div class="say">\u2192 ${esc(d.pressed)}${d.typed ? ` \u2192 typed \u201c${esc(d.typed)}\u201d` : ''}</div>`);
+    setMood(M.acted); nod();
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return acted;
+}
+
+// The older path: a Choice built from the controls that exist at this instant —
+// running apps, open tabs, the frontmost app's menus — then the screen-reading
+// loop if none of them match.
+/// `partial` means the sentence is still being spoken.
+///
+/// Bringing an app forward on half a sentence is the whole point of prefetching —
+/// "open sla" is unambiguous and switching back is free. Acting *inside* an app is
+/// different: the goal text is what picks the control, so a truncated goal picks a
+/// control for a request nobody made. A partial gets the app switch and stops.
+async function driveDecide(said, partial = false) {
+  const { controls: list } = await controls();
+  const r = await fetch('/api/drive', { method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text: said, controls: list }) });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error ?? r.status);
+
+  decisions++; inTokens += d.usage?.input_tokens ?? 0;
+  const spend = inTokens * USD_PER_INPUT_TOKEN;
+  latEl.textContent = `${d.ms}ms`;
+  costEl.textContent = `${decisions} decision${decisions===1?'':'s'} · `
+    + `$${(spend/decisions).toFixed(6)} each · $${spend.toFixed(5)} total`;
+
+  const n = `cmd ${d.isCommand.toFixed(2)} · p ${d.p.toFixed(2)} · conf ${d.confidence.toFixed(2)}`;
+  const label = list.find(c => c.id === d.action)?.label ?? d.action;
+
+  if (d.isCommand < ACT_MIN) {
+    setMood(M.idle); ev('ign', `<b>“${said}”</b><br><span class="n">${n}</span> → not for me`);
+  } else if (d.action === 'none' || d.confidence < CONF_MIN) {
+    // Apps, tabs and menus have nothing, which is the normal answer for anything
+    // happening *inside* the window you are already looking at: "go back", "scroll
+    // down", "click the first result" all come back none, because none of them is
+    // an app, a tab or a menu item.
+    //
+    // The accessibility tree is where those live, so it gets the next turn. This
+    // used to drop straight to OCR, which was written before axtree existed and
+    // never revisited — OCR is slower, cannot see a control that draws no text, and
+    // hands back a coordinate rather than an element. It stays as the last resort,
+    // for canvases, video, and anything that exposes no tree at all.
+    if (partial) return;                    // an unfinished goal picks unfinished controls
+    const did = await axLoop(said, null);
+    if (!did) {
+      ev('ign', `<b>“${said}”</b><br><span class="n">${n}</span> → nothing in the tree, reading the screen…`);
+      await screenLoop(said);
+    }
+  } else if (confirmMenus && d.action.startsWith('item:')) {
+    // Menu items can close things. Ask.
+    setMood(M.ask);
+    const row = ev('ask', `<b>“${said}”</b><br><span class="n">${n}</span> → <b>${label}</b>`);
+    const go = document.createElement('div'); go.className = 'go';
+    const yes = document.createElement('button'); yes.textContent = 'do it';
+    const no = document.createElement('button'); no.textContent = 'no';
+    go.append(yes, no); row.append(go);
+    yes.onclick = async () => { go.remove(); row.className='ev act';
+      try { row.innerHTML += `<br>✓ ${await act(d.action)}`; setMood(M.acted); nod(); }
+      catch (e) { row.className='ev err'; row.innerHTML += `<br>${e.message}`; } };
+    no.onclick = () => { go.remove(); row.className='ev ign'; setMood(M.idle); };
+  } else if (d.action.startsWith('app:') && d.confidence < APP_MIN) {
+    setMood(M.lost); shake();
+    ev('ign', `<b>\u201c${esc(said)}\u201d</b>`
+      + `<div class="say">I am not sure which app you mean \u2014 the closest running `
+      + `one is ${esc(label.replace(/^Bring the | application to the front$/g, ''))}, `
+      + `and I am only ${Math.round(d.confidence * 100)}% sure. Is it running?</div>`);
+  } else {
+    const done = await act(d.action);
+    setMood(M.acted); nod();
+    ev('act', `<b>“${said}”</b><br><span class="n">${n}</span> → <b>${done}</b>`);
+    // Bringing an app forward is often only half of what was asked. The loop asks
+    // whether it was, and stops immediately if so.
+    // Name the app rather than letting the loop read whatever is frontmost: a
+    // notification stealing focus between the switch and the look is enough to make
+    // it reason about the wrong window.
+    //
+    // Not while the sentence is still being spoken, though: the goal text is what
+    // picks the control, and a truncated goal picks a control for a request nobody
+    // made.
+    if (!partial) {
+      await axLoop(said, /brought (.+?) to the front/.exec(done)?.[1] ?? null);
+    }
+  }
+}
+
+// --- keeping out of the way ---------------------------------------------------
+//
+// He floats over everything, which is the point, right up until he is floating over
+// the thing you are reading.
+//
+// The first version of this avoided the *focused window* and consequently never
+// moved once: measured against a real desk, the focused window was full screen, so
+// all four corners overlapped it identically, "is anywhere better?" was always no,
+// and he sat still forever. Avoiding a window is meaningless when the window is the
+// whole screen.
+//
+// The pointer is the signal that actually means something. Where your mouse is, is
+// where you are working — so he keeps his distance from it, and takes the corner
+// furthest from it when he has to move. And he glides rather than teleports,
+// because a window that jumps reads as a glitch and a window that travels reads as
+// a decision.
+const TAURI = window.__TAURI__ ?? null;
+
+// He is told when the pointer comes close, because the page has no way to find
+// out. :hover fires only once the pointer is already on him, and not even then if
+// the app is not active — macOS sends mouse-moved events to the key window only.
+// Rust reads the position off AppKit instead. src-tauri/src/near.rs.
+if (TAURI?.event?.listen) {
+  document.body.classList.add('native');
+  TAURI.event.listen('mist:near', e => {
+    document.body.classList.toggle('near', !!e.payload);
+  });
+}
+let avoid = true, lastMove = 0, gliding = null;
+const MOVE_GAP = 1800, EDGE = 18, REACH = 150;
+
+const dist = (ax, ay, bx, by) => Math.hypot(ax - bx, ay - by);
+const overlap = (a, b) => Math.max(0, Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x))
+                        * Math.max(0, Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y));
+
+async function glideTo(win, from, to) {
+  // Critically damped-ish: quick to leave, slow to arrive, no overshoot. Sixteen
+  // frames at 60Hz is about a quarter of a second, which reads as deliberate.
+  gliding = to;
+  for (let i = 1; i <= 16; i++) {
+    if (gliding !== to) return;                 // a newer move took over
+    const k = 1 - Math.pow(1 - i / 16, 3);
+    await win.setPosition(new TAURI.window.LogicalPosition(
+      Math.round(from.x + (to.x - from.x) * k),
+      Math.round(from.y + (to.y - from.y) * k)));
+    await new Promise((r) => setTimeout(r, 16));
+  }
+  gliding = null;
+}
+
+async function keepClear() {
+  if (!avoid || !TAURI?.window || gliding) return;
+  const now = performance.now();
+  if (now - lastMove < MOVE_GAP) return;
+
+  let space;
+  try { space = await fetch('/api/desktop/space').then((r) => r.json()); } catch { return; }
+  const { mouse, focus, screen, front } = space ?? {};
+  if (!screen) return;
+  if (front?.app === 'Rove') return;
+
+  const win = TAURI.window.getCurrentWindow();
+  const sf = await win.scaleFactor();
+  const p = await win.outerPosition(), sz = await win.outerSize();
+  const me = { x: p.x / sf, y: p.y / sf, w: sz.width / sf, h: sz.height / sf };
+
+  // He does not run from the pointer. He has a text box and a microphone button on
+  // him, so the pointer coming near him usually means it is coming *for* him, and a
+  // window that dodges the hand reaching for it is infuriating. The first version
+  // did exactly that.
+  if (mouse) {
+    const near = dist(Math.max(me.x, Math.min(mouse.x, me.x + me.w)),
+                      Math.max(me.y, Math.min(mouse.y, me.y + me.h)),
+                      mouse.x, mouse.y);
+    if (near < REACH) return;
+  }
+
+  // What he does get out of the way of is the thing you are typing into. The caret's
+  // own element is the only signal here that means "the work is here": the focused
+  // window is the whole screen and tells you nothing, and the pointer means the
+  // opposite of what it looks like. If the app will not say, he stays put — which is
+  // the right default for something that floats over everything.
+  if (!focus) return;
+  // Some apps name the whole window as their focused element, which is not a caret
+  // and not a place you are working — it is the absence of an answer wearing one's
+  // clothes. Taken at face value it overlaps him permanently and he never stops
+  // moving.
+  if (focus.role === 'AXWindow' || focus.w * focus.h > screen.w * screen.h * 0.35) return;
+  if (overlap(me, focus) < me.w * me.h * 0.05) return;
+
+  const spots = [
+    { x: screen.x + screen.w - me.w - EDGE, y: screen.y + EDGE },
+    { x: screen.x + screen.w - me.w - EDGE, y: screen.y + screen.h - me.h - EDGE },
+    { x: screen.x + EDGE,                   y: screen.y + EDGE },
+    { x: screen.x + EDGE,                   y: screen.y + screen.h - me.h - EDGE },
+  ];
+  let best = null;
+  for (const sp of spots) {
+    const ov = overlap({ ...sp, w: me.w, h: me.h }, focus);
+    const travel = dist(sp.x, sp.y, me.x, me.y);
+    if (travel < 40) continue;
+    const cost = ov * 1000 + travel;
+    if (!best || cost < best.cost) best = { ...sp, cost, ov };
+  }
+  if (!best || best.ov >= overlap(me, focus)) return;
+
+  lastMove = now;
+  await glideTo(win, me, best);
+}
+
+if (TAURI?.window) setInterval(keepClear, 1500);
+// `a` toggles it, because the right amount of autonomy for a window that moves
+// itself is "and you can turn it off".
+addEventListener('keydown', (e) => {
+  if (e.key === 'a' && e.target.tagName !== 'INPUT') {
+    avoid = !avoid;
+    ev('ign', avoid ? 'staying out of your way' : 'staying put');
+  }
+});
+
+document.getElementById('auto').addEventListener('click', (e) => {
+  confirmMenus = !confirmMenus;
+  e.target.textContent = confirmMenus ? 'confirm menus' : 'menus auto';
+  e.target.classList.toggle('on', !confirmMenus);
+});
+
+const listenBtn = document.getElementById('listen');
+const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+let recog = null;
+listenBtn.addEventListener('click', () => {
+  if (!SR) { errEl.textContent = 'no SpeechRecognition — use Chrome'; return; }
+  if (recog) { recog.stop(); recog=null; listenBtn.textContent='start listening';
+    listenBtn.classList.remove('on'); setMood(M.idle); stopLevels();
+    micState = 'off'; micLive = false; interim = ''; blip(false); return; }
+  micErr = ''; micState = 'starting'; blip(true);
+  startLevels()
+    .then(async () => { micLive = true; micState = `on (${await permState()})`; })
+    .catch((e) => { micErr = `level: ${e.name ?? e.message}`; });
+
+  recog = new SR(); recog.continuous=true; recog.interimResults=true; recog.lang='en-US';
+  recog.onstart = () => { micLive = true; micState = 'listening'; micErr = ''; };
+  recog.onspeechstart = () => { micState = 'hearing speech'; };
+  recog.onspeechend = () => { micState = 'listening'; };
+  recog.onresult = (e) => {
+    let live = '';
+    for (let i=e.resultIndex; i<e.results.length; i++) {
+      const r = e.results[i];
+      if (r.isFinal) { interim = ''; resetRoute(); setMood(M.heard); decide(r[0].transcript.trim()); }
+      else live += r[0].transcript;
+    }
+    if (live) { interim = live; readLive(live.trim()); routeLive(live.trim()); }
+  };
+  recog.onerror = (e) => {
+    micErr = e.error;
+    // not-allowed and service-not-allowed are fatal: restarting on them spins forever
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+      recog = null; micLive = false;
+      listenBtn.textContent = 'start listening'; listenBtn.classList.remove('on');
+      stopLevels();
+    }
+  };
+  recog.onend = () => {
+    if (!recog) { micState = 'off'; micLive = false; return; }
+    micState = 'restarting';
+    try { recog.start(); } catch { /* already starting */ }
+  };
+  recog.start(); micLive = true;
+  listenBtn.textContent='listening…'; listenBtn.classList.add('on');
+});
+
+// Approach reveals, click commits. Escape or losing focus puts it away again, so he
+// goes back to being just a face the moment you are done.
+const pill = document.getElementById('pill');
+const floatPanel = document.getElementById('float');
+document.getElementById('pillType').addEventListener('click', () => {
+  document.body.classList.add('typing');
+  document.getElementById('say').focus();
+});
+document.getElementById('pillMic').addEventListener('click', () => listenBtn.click());
+
+// His own three. One is the backlight, which is the thing a button on a handheld
+// has always been for and the answer to where it lives; the dial is the
+// microphone; two is the screen he is. Each lights when its own thing is on, so
+// the case is both the control and the readout — which is the whole point of a
+// button that is moulded into something.
+document.getElementById('key1').addEventListener('click', () => { lampOn = !lampOn; });
+document.getElementById('key2').addEventListener('click', () => listenBtn.click());
+document.getElementById('key3').addEventListener('click', () => { lcdMode = !lcdMode; });
+document.getElementById('say').addEventListener('blur', () => {
+  if (!document.getElementById('say').value.trim()) document.body.classList.remove('typing');
+});
+// The close button does what Escape does, for anyone who did not know Escape does it.
+document.getElementById('sayclose').addEventListener('click', () => {
+  const el = document.getElementById('say');
+  el.value = '';
+  document.body.classList.remove('typing');
+  el.blur();
+});
+
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { document.body.classList.remove('typing'); document.getElementById('say').blur(); }
+});
+// keep the pill's talk button in step with the listen state
+new MutationObserver(() => {
+  document.getElementById('pillMic').classList.toggle('on', listenBtn.classList.contains('on'));
+}).observe(listenBtn, { attributes: true, attributeFilter: ['class'] });
+
+// Type instead of talking. A visible box, because a hidden slash key opening a
+// browser prompt() is not an answer to "where do I type".
+const sayEl = document.getElementById('say');
+// He reads what you are typing while you type it, the same way he reads a sentence
+// you are still saying. No extra throttling needed: readLive already refuses to ask
+// again inside 420ms or for text it has already seen, so holding a key down costs
+// nothing and a burst of typing costs one read every couple of words.
+//
+// Reaction only — deliberately not routing. On speech the router runs against the
+// interim transcript too, so an app is open before the sentence finishes; doing
+// that to half-typed text would open things while you were still deciding what to
+// ask for, and you can see the text you are typing, so there is nothing to gain.
+sayEl.addEventListener('input', () => {
+  const v = sayEl.value.trim();
+  if (v.length > 5) readLive(v);
+});
+
+sayEl.addEventListener('keydown', (e) => {
+  e.stopPropagation();
+  if ((e.key === 'Enter' || e.keyCode === 13) && sayEl.value.trim()) {
+    const v = sayEl.value.trim(); sayEl.value = '';
+    setMood(M.heard); decide(v);
+  }
+});
+addEventListener('keydown', (e) => {
+  if (e.key === '/' && e.target.tagName !== 'INPUT') { e.preventDefault(); sayEl.focus(); }
+});
+// the panel sets user-select:none for dragging, which also kills text selection in
+// the input unless it is exempted
+sayEl.style.userSelect = 'text';
+
+const nativePost = (type, extra = {}) => window.webkit.messageHandlers.mist.postMessage({type,...extra});
+decide = async text => nativePost('text', {text});
+readLive = async () => {};
+routeLive = async () => {};
+say = text => nativePost('speak', {text});
+window.mistState = (state, text) => {
+  micLive = state === 'listening'; talking = state === 'speaking';
+  talkText = text || ''; talkAt = performance.now();
+  document.body.classList.toggle('talking', talking);
+  listenBtn.classList.toggle('on', micLive);
+  setMood(state === 'error' ? M.lost : state === 'thinking' ? M.ask : micLive ? M.heard : M.idle);
+  if (text) think(text, 'Rove · local');
+};
+document.addEventListener('click', e => {
+  if (e.target.closest('#pillMic,#key2,#listen')) { e.preventDefault(); e.stopImmediatePropagation(); nativePost('toggle'); }
+}, true);
+document.addEventListener('keydown', e => { if(e.key === 'Escape') nativePost('stop'); },true);
+let nativeDrag = null;
+fc.addEventListener('pointerdown', e => { nativeDrag = {x:e.screenX,y:e.screenY}; fc.setPointerCapture(e.pointerId); nativePost('dragStart'); });
+fc.addEventListener('pointermove', e => { if(nativeDrag) { nativePost('drag',{dx:e.screenX-nativeDrag.x,dy:e.screenY-nativeDrag.y}); nativeDrag={x:e.screenX,y:e.screenY}; }});
+fc.addEventListener('pointerup', () => { nativeDrag=null; nativePost('dragEnd'); });
+fc.addEventListener('pointercancel', () => { nativeDrag=null; nativePost('dragEnd'); });
+nativePost('ready');
+</script>
