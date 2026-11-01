@@ -42,7 +42,8 @@ final class ScoutTrackOverlay {
         roverWindow=window
         trail.update(position:position,heading:heading,scale:scale,time:ProcessInfo.processInfo.systemUptime,frontContact:frontContact,grounded:grounded)
         if !trail.marks.isEmpty,timer==nil {
-            timer=Timer.scheduledTimer(withTimeInterval:1/30,repeats:true) { [weak self] _ in self?.refresh() }
+            let clock=Timer(timeInterval:1/30,repeats:true) { [weak self] _ in self?.refresh() }
+            timer=clock;RunLoop.main.add(clock,forMode:.common)
             refresh()
         }
     }
