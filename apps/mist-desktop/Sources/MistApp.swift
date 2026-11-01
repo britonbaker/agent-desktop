@@ -7,9 +7,62 @@ import FoundationModels
 @main
 struct RoveMain {
     static func main() {
+        if CommandLine.arguments.contains("--vision-front-test") {
+            setbuf(stdout,nil)
+            Task { @MainActor in
+                do {
+                    let active=NSWorkspace.shared.frontmostApplication
+                    let app=active?.bundleIdentifier == Bundle.main.bundleIdentifier ? FrontWindow.underlyingApp() : active
+                    guard let app,let window=FrontWindow.find(pid:app.processIdentifier) else {throw NSError(domain:"RoveFrontTest",code:1)}
+                    let observation=await ScreenContext.observe(app:app.localizedName ?? "Unknown",windowID:window.id)
+                    let image=try await ScreenImage.capture(window:window.id,pageBounds:observation.pageBounds)
+                    if let index=CommandLine.arguments.firstIndex(of:"--save-test-image"),CommandLine.arguments.count>index+1 {
+                        try image.write(to:URL(fileURLWithPath:CommandLine.arguments[index+1]))
+                    }
+                    let source=(app.localizedName ?? "Unknown")+" — "+(observation.pageTitle ?? window.title)
+                    print("CAPTURE SOURCE:",source,"IMAGE BYTES:",image.count)
+                    let started=Date()
+                    print("VISION ANSWER:",try await LocalVision.shared.explain(question:"What am I looking at? Explain the main page and what it is for.",excerpt:observation.excerpt,image:image,source:source))
+                    print("ELAPSED:",Date().timeIntervalSince(started));await LocalVision.shared.stop();exit(0)
+                } catch {print("FAIL:",error);await LocalVision.shared.stop();exit(1)}
+            }
+            RunLoop.main.run();return
+        }
+        if CommandLine.arguments.contains("--screen-permission-check") {
+            print(ScreenImage.permitted ? "Screen capture permitted" : "Screen capture permission required");exit(0)
+        }
         if CommandLine.arguments.contains("--scout-self-test") {
             do { let renderer=try ScoutRenderer(frame:CGRect(x:0,y:0,width:300,height:380));try renderer.selfTest();exit(0) }
             catch { print("FAIL: \(error)");exit(1) }
+        }
+        if let index=CommandLine.arguments.firstIndex(of:"--vision-image-test"),CommandLine.arguments.count>index+1 {
+            setbuf(stdout,nil)
+            let path=CommandLine.arguments[index+1]
+            Task { @MainActor in
+                do {
+                    let image=try Data(contentsOf:URL(fileURLWithPath:path))
+                    let began=Date()
+                    print("Starting offline local vision image test")
+                    let answer=try await LocalVision.shared.explain(question:"What am I looking at? Explain the visible activity naturally without inventing hidden content.",excerpt:"",image:image,source:CommandLine.arguments.firstIndex(of:"--source-window").flatMap {CommandLine.arguments.count>$0+1 ? CommandLine.arguments[$0+1] : nil} ?? "Unknown app; describe only visually evident content")
+                    print("VISION ANSWER:",answer);print("Elapsed seconds:",Date().timeIntervalSince(began))
+                    await LocalVision.shared.stop();exit(0)
+                } catch {print("FAIL:",error);await LocalVision.shared.stop();exit(1)}
+            }
+            RunLoop.main.run();return
+        }
+        if let index=CommandLine.arguments.firstIndex(of:"--screen-file-test"),CommandLine.arguments.count>index+1 {
+            setbuf(stdout,nil)
+            let path=CommandLine.arguments[index+1]
+            Task { @MainActor in
+                do {
+                    let data=try Data(contentsOf:URL(fileURLWithPath:path))
+                    let excerpt=ScreenContext.summarize(data)
+                    print("EXCERPT CHARS:",excerpt.count)
+                    print(try await DesktopAgent.explainExcerpt(excerpt,request:"Explain the page I am looking at.",diagnostics:{print($0)}))
+                    exit(0)
+                } catch {print("FAIL:",error);exit(1)}
+            }
+            RunLoop.main.run();return
         }
         if CommandLine.arguments.contains("--desktop-self-test") {
             setbuf(stdout,nil)
@@ -80,6 +133,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var monitor: Any?
     private var ready = false
     private var lastExternalApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
+    private var lastExternalPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
     private var appObserver: NSObjectProtocol?
     private let profileURL = URL.applicationSupportDirectory.appendingPathComponent("Rove/tap-profile.json")
 
@@ -89,9 +143,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         setupMenu()
         Task { _ = try? await PhononModel.shared.get() }
+        if VisionConfiguration.installed {Task {try? await LocalVision.shared.prepare()}}
         appObserver = NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] note in
             if let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication, app.bundleIdentifier != Bundle.main.bundleIdentifier { if let self,let name=app.localizedName,name != self.lastExternalApp {
-                    self.previousExternalApp=self.lastExternalApp;self.lastExternalApp=name
+                    self.previousExternalApp=self.lastExternalApp;self.lastExternalApp=name;self.lastExternalPID=app.processIdentifier
                 } }
         }
         let config = WKWebViewConfiguration()
@@ -158,6 +213,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             item.target = self; item.representedObject = id; choices.addItem(item)
         }
         companions.submenu = choices; menu.insertItem(companions, at: 0)
+        let screenImage=NSMenuItem(title:"Screen image access…",action:#selector(screenImageAccess),keyEquivalent:"")
+        screenImage.target=self;menu.addItem(screenImage)
         let access = NSMenuItem(title: "Screen reading access…", action: #selector(screenAccess), keyEquivalent: "")
         access.target = self; menu.addItem(access)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -207,6 +264,10 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         item.state=enabled && available ? .on : .off
         if enabled && !available {update("error","Lid angle unavailable. Using the fixed viewpoint.")}
     }
+    @objc private func screenImageAccess() {
+        if !ScreenImage.permitted {CGRequestScreenCaptureAccess()}
+        if let url=URL(string:"x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {NSWorkspace.shared.open(url)}
+    }
     @objc private func screenAccess() {
         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") { NSWorkspace.shared.open(url) }
     }
@@ -228,6 +289,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func explainWindow() { respond("Explain the page or window I am looking at. Start with its main content and what I can do next.") }
     @objc private func showLastReply() {
         let alert=NSAlert();alert.messageText="Rove";alert.informativeText=reply.isEmpty ? "No spoken reply yet. Double-tap or press Talk to ask a question." : reply
+        if !desktopAgent.lastSource.isEmpty {alert.informativeText += "\n\nSource: " + desktopAgent.lastSource}
         alert.addButton(withTitle:"Done");alert.runModal()
     }
     @objc private func show() { panel.orderFrontRegardless() }
@@ -275,7 +337,13 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let ticket = generation
         update("thinking", text)
         guard SystemLanguageModel.default.isAvailable else { update("error", "Apple’s local model is unavailable. Nothing was sent online."); return }
-        let currentApp = lastExternalApp
+        let active=NSWorkspace.shared.frontmostApplication
+        let front=active?.bundleIdentifier == Bundle.main.bundleIdentifier ? FrontWindow.underlyingApp() : active
+        if let front,front.bundleIdentifier != Bundle.main.bundleIdentifier {
+            if front.localizedName != lastExternalApp {previousExternalApp=lastExternalApp}
+            lastExternalApp=front.localizedName ?? lastExternalApp;lastExternalPID=front.processIdentifier
+        }
+        let currentApp = lastExternalApp,currentPID=lastExternalPID
         let previousApp=previousExternalApp
         responseTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -283,7 +351,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 guard let self,self.generation==ticket else {return};self.update("thinking",message)
             }
             do {
-                let answer=try await self.desktopAgent.answer(text,front:currentApp,recent:self.recentTurns,previous:previousApp,authorized:{[weak self] in self?.generation==ticket})
+                let answer=try await self.desktopAgent.answer(text,front:currentApp,recent:self.recentTurns,previous:previousApp,frontPID:currentPID,authorized:{[weak self] in self?.generation==ticket})
                 guard !Task.isCancelled,self.generation==ticket else {return}
                 self.reply=answer
                 self.recentTurns=String((self.recentTurns+"\nUser: "+text+"\nRove: "+answer).suffix(1400))
@@ -442,6 +510,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     func applicationWillTerminate(_ notification: Notification) {
         stop(); motion.stop(); tossTimer?.invalidate(); ambientTimer?.invalidate(); parkRover()
+        Task {await LocalVision.shared.stop()}
         if let monitor { NSEvent.removeMonitor(monitor) }
         if let appObserver { NSWorkspace.shared.notificationCenter.removeObserver(appObserver) }
     }

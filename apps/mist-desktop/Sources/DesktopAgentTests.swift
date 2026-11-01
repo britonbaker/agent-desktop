@@ -42,9 +42,9 @@ import FoundationModels
     let answer=try await DesktopAgent.explainExcerpt(excerpt,request:"What is this page about?")
     print("SCREEN ANSWER:",answer)
     try require(!answer.lowercased().contains("cars") && !answer.lowercased().contains("copy and paste"),"Invented page capabilities")
-    let good=ScreenExplanation(answer:"A rover collection.",evidence:["Scout, a survey rover"])
-    let bad=ScreenExplanation(answer:"A car editor.",evidence:["Copy cars into other apps"])
-    try require(DesktopAgent.evidenceIsValid(good,excerpt:excerpt),"Grounded quotes")
-    try require(!DesktopAgent.evidenceIsValid(bad,excerpt:excerpt),"Reject invented evidence")
+    let good=ScreenExplanation(answer:"A rover collection.",evidence:[1,3])
+    let bad=ScreenExplanation(answer:"A car editor.",evidence:[999])
+    try require(DesktopAgent.evidenceIsValid(good,excerpt:excerpt),"Valid source references")
+    try require(!DesktopAgent.evidenceIsValid(bad,excerpt:excerpt),"Reject invented source references")
     print("PASS desktop agent self-test: no UI actions, audio or microphone used")
 }

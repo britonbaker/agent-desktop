@@ -10,6 +10,12 @@ import Foundation
         let browser:[String:Any]=["ok":true,"data":["complete":true,"tree":["role":"window","children":[["role":"toolbar","name":String(repeating:"Toolbar chrome ",count:500)],["role":"webarea","name":"Page","children":[["role":"main","children":[["role":"statictext","name":"Actual article content"]]]]]]]]]
         let page=try summarize(browser)
         precondition(page.contains("Actual article content") && !page.contains("Toolbar chrome"))
+        let longNavigation=(0..<15).map {index in ["role":"link","name":"Navigation item \(index) " + String(repeating:"menu ",count:100)]}
+        let documentation:[String:Any]=["ok":true,"data":["tree":["role":"window","children":[["role":"webarea","name":"Rove directory · GitHub","children":[["role":"main","children":[["role":"navigation","children":longNavigation],["role":"article","children":[["role":"heading","name":"Rove voice prototype","value":"1"],["role":"statictext","name":"A local Mac companion with speech and desktop controls."]]]]]]]]]]]
+        let doc=try summarize(documentation)
+        precondition(doc.contains("A local Mac companion"),"Article content must precede long repository navigation")
+        precondition(doc.components(separatedBy:"\n").first?.contains("GitHub")==true,"Keep page identity before the article")
+        precondition(!doc.contains("Rove voice prototype · 1"),"Heading levels are not spoken content")
         let grounded=ScreenContext.spokenReadout("heading: My article\nstatictext: Actual page fact",selected:[1,999,-1,1])
         precondition(grounded.contains("Actual page fact") && !grounded.contains("999"))
         precondition(grounded.components(separatedBy:"Actual page fact").count==2)

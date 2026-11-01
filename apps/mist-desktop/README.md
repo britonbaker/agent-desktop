@@ -1,6 +1,6 @@
 # Rove voice prototype
 
-A floating Rove character connected to local Apple speech recognition, Apple's on-device Foundation Model, and Gradium Phonon 0.4.0 speech. Rove can explain accessible window content, list running apps and switch to a requested running app. Other desktop actions are disabled. This app is separate from the installed agent-desktop CLI and the earlier Aural Assistant app.
+A floating Rove character connected to local Apple speech recognition, Apple's on-device Foundation Model, and Gradium Phonon 0.4.0 speech. Rove can explain the front page using local Qwen vision and accessible text, list running apps and switch to a requested running app. Other desktop actions are disabled. This app is separate from the installed agent-desktop CLI and the earlier Aural Assistant app.
 
 ## Current interaction
 
@@ -49,7 +49,7 @@ The Companion menu offers Pixel Face, the recovered white handheld with sticky h
 
 Set `ROVE_SIGNING_IDENTITY` to a development signing identity, or save its name in an untracked `.signing-identity` file in this directory. Otherwise the build uses ad-hoc signing. A stable development identity helps macOS retain grants between builds. Signing material and personal calibration are not included in the repository.
 
-Set `ROVE_AGENT_DESKTOP_BIN` to the installed agent-desktop package's native `bin` directory. The current fallback checks the existing local Node installation. The build copies the engine and helper into the app; at runtime Rove installs them into its private support folder because the executable did not return output from Resources. Reading a dense app currently allows up to ten seconds. A live test identified the open Computer Use/JEV post, but surrounding host-window context still leaks into explanations.
+Set `ROVE_AGENT_DESKTOP_BIN` to the installed agent-desktop package's native `bin` directory. The current fallback checks the existing local Node installation. The build copies the engine and helper into the app; at runtime Rove installs them into its private support folder because the executable did not return output from Resources. Reading a dense app allows up to ten seconds. Window selection prefers the accessibility-focused window over small browser utility windows; one selected page supplies both text and image bounds.
 
 The white handheld uses the original lid geometry. Its neutral mode keeps pupils and lids dark, limits lens reflections over dark areas, and applies extended-range brightness to the case, handle, hand, and white display areas. Actual HDR appearance depends on display headroom and cannot be assessed from an SDR screenshot alone.
 
@@ -85,10 +85,10 @@ Run `build/Rove.app/Contents/MacOS/Rove --scout-self-test` to compile and render
 
 Scout's recessed roof display uses amber pixel lettering like his face. It shows READY, LISTEN, THINK, TALK or ERROR from the native conversation state. Routine thought bubbles and the old browser microphone diagnostics are hidden. Errors that need attention can still show above him. The existing Talk and type controls remain available, and the character button exposes its state to accessibility tools. **Show last reply** (Command-R) opens the full spoken answer in an accessible native dialog.
 
-**Explain front window** (Command-E) reads the last external app through the same local conversation pipeline. The reader prioritizes embedded web pages and main content before browser controls and host sidebars, while retaining the bounded excerpt and protected-field exclusions. Ordinary greetings no longer require a successful screen read. Screenshot vision remains unavailable; image-only content is not interpreted. App switching is enabled through a separate action allowlist.
+**Explain front window** (Command-E) reads the last external app through the same local conversation pipeline. The reader prioritizes embedded web pages and main content before browser controls and host sidebars, while retaining the bounded excerpt and protected-field exclusions. Ordinary greetings no longer require a successful screen read. When the optional local vision installation is present, Rove captures the same window and crops it to the selected embedded page. Screen Recording permission is required for images; without it, the reply identifies that it is using readable text. App switching uses a separate action allowlist.
 
 
-Screen explanations now synthesize a short conversational answer from accessible page content. The local model supplies exact evidence quotations, which must occur in the excerpt. A second local generation checks whether every factual claim is supported. If either check fails, Rove says it cannot confidently explain the whole page and falls back to source text. These checks reduce unsupported claims; they do not guarantee correctness. Rove cannot interpret image-only content or interfaces without useful accessibility text.
+With local vision installed, Qwen3.5-4B receives the window image, source identity and bounded accessibility excerpt. Apple Foundation Models remains responsible for conversation and action routing. Without the vision installation, the Apple screen-summary path checks numbered source references and a second generation reviews support for its claims. Neither path guarantees correctness; live Apple-only tests produced unsupported descriptions, which motivated the image model.
 
 ## Natural desktop requests
 
@@ -118,3 +118,16 @@ Wandering pauses while the pointer is near Scout or his controls, while the text
 
 
 Live window-position sampling observed ten distinct positions during a 15-second idle check, and one position during a separate 15-second check with the text input open and the pointer elsewhere. The minimized and expanded capsules were visually reviewed. Transparent window padding lets mouse clicks pass through to the app underneath; mouse interaction regions surround the rover and controls.
+
+
+Page capture reads to depth 30 so content nested inside a browser hosted by another app can reach the model. Embedded page titles remain ahead of article content, and articles are read before long navigation trees. Numeric heading levels are omitted from spoken text. A real capture of the GitHub Rove folder reproduced the shallow-navigation failure; after the fix, the local model identified it as the GitHub repository page for the Rove voice prototype. `--screen-file-test PATH` runs this pipeline against a local snapshot JSON without microphone, playback or desktop actions. Its diagnostics print the proposed answer, source references and review result, so use it only with snapshots you intend to inspect locally.
+
+## Optional local vision
+
+Run `python3 vision/setup-local-vision.py` from this directory to install the pinned MLX runtime and Qwen3.5-4B 4-bit model under `~/Library/Application Support/Rove/Vision`. The installer records absolute paths in `~/Library/Application Support/Rove/local-vision.json`. The model requires about 3.1 GB plus its Python runtime; the installer checks available space before a fresh installation. Weights and machine-specific configuration are not part of the repository.
+
+At runtime, Rove owns a bearer-authenticated server bound to a random loopback port. A macOS sandbox denies external networking; Hugging Face and Transformers offline modes prevent runtime downloads. The server exits when its owning Rove process exits. Its MLX cache is capped at 256 MiB, with an 8 GiB allocation limit. Normal operation keeps screenshots in memory and suppresses server logs. This integration returns a completed explanation before speech begins; vision-to-speech streaming is not implemented.
+
+`--vision-front-test` captures and explains the current front page without microphone, audio or desktop actions. `--vision-image-test PATH --source-window TITLE` tests a supplied image and prints local diagnostics. The optional `--save-test-image PATH` on the front test writes a diagnostic screenshot only when explicitly requested. Do not commit screenshots containing private content. A captured Scout editor image was correctly described as a rover customization page in a cold test taking about 17 seconds. That single result does not establish general screen accuracy or live voice latency.
+
+A full capture test identified a ChatGPT image-editing conversation from its current Chrome page in about 11 seconds of local vision time. Page-reader tests, the Apple routing self-test, the native build and signature verification passed. Physical double-knock speech input and the new vision reply still need a combined user test.
