@@ -17,6 +17,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     var moving = false
     var wheeliePitch:Float=0
     var faceRequested = false
+    var roofFace = false
     var viewingDistance: Double = 550
     private var lid: LidAngle?
     private var baselineAngle: Double?
@@ -89,7 +90,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
                 heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
                 Float(Date().timeIntervalSince(entered)),headroom,renderedWheelie,0,
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
-                lampLift,shadow ? 1 : 0,tracks ? 1 : 0,0]
+                lampLift,shadow ? 1 : 0,tracks ? 1 : 0,(roofFace || ["listening","thinking","speaking"].contains(state)) ? 1 : 0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
@@ -153,13 +154,14 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20)] {
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0)] {
             let w=600,h=760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
             if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
+            if name.hasPrefix("roof-face") {values[23]=1;values[10]=name=="roof-face-speaking" ? 3 : 1}
             encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
             if let error=command.error {throw error}
             var raw=[UInt16](repeating:0,count:w*h*4)

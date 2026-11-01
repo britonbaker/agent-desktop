@@ -158,4 +158,8 @@ Say “switch to the app we were just using,” “take me to three apps ago,”
 
 `AppTimelineTests.swift` covers duplicate exclusion, repeat visits, ordinal references, bounded storage and a persistence roundtrip. The desktop self-test adds natural history commands and a negated history request. Actual speech recognition and live app activation remain separate runtime checks.
 
+After a verified app switch, Scout drives toward that app’s readable Dock tile on the same display. If the tile is unavailable, he uses the actual destination window’s upper-left area. Reduced Motion keeps him parked; an unavailable position or a destination on another display also leaves him parked. He speaks the selected app name and history offset. **Show last reply** includes the request heard, kept in memory for the current session.
+
+Scout’s roof glass shows the existing authored face ink while listening, thinking, speaking or driving toward an app. This reuses the selected face design and expression on the physical display, with the existing Metal renderer and extended-range color path. The normal readout returns after the conversation and movement finish.
+
 `--voice-audition PATH.wav` writes a clean local Gradium sample without opening the microphone or playing audio. `python3 scripts/make-voice-auditions.py --output /absolute/output/folder` creates three local robot-character previews using that sample and ffmpeg. These audition files do not change the live voice; selection and integration are separate.

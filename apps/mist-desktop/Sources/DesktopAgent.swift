@@ -44,6 +44,7 @@ struct DesktopApp: Equatable {
     var lastSource = ""
     private var lastSwitch:(from:String,to:String)?
     var onStatus: ((String)->Void)?
+    var onSwitch: ((DesktopApp,Int)->Void)?
 
     static func runningApps() -> [DesktopApp] {
         NSWorkspace.shared.runningApplications.compactMap { app in
@@ -88,7 +89,7 @@ struct DesktopApp: Equatable {
         }
         if negated || quoted {return nil}
         if ["what apps are open","what apps are running","which applications do i have open","which apps are open","which applications are running"].contains(where:text.hasPrefix) {return DesktopRequest(intent:.listApps,targetAppID:"",explainAfterSwitch:false)}
-        let command=["bring ","switch ","take me ","go back","return to ","return me ","open "].contains(where:text.hasPrefix)
+        let command=["bring ","switch ","take me ","go back","go to ","put me back","return to ","return me ","open "].contains(where:text.hasPrefix)
         guard command else {return nil}
         let words=Set(text.split(separator:" ").map(String.init))
         if !words.isDisjoint(with:["delete","trash","send","purchase","buy","click","type","close","quit","kill","settings","permissions"]) {return DesktopRequest(intent:.unsupportedAction,targetAppID:"",explainAfterSwitch:false)}
@@ -132,14 +133,21 @@ struct DesktopApp: Equatable {
             else if authorization.explicitSwitch {result.intent = .switchApp}
             else {result.explainAfterSwitch=false;if result.intent == .switchApp {result.intent = .conversation;result.targetAppID=""}}
         }
-        if result.intent == .switchApp,let steps=AppTimeline.historySteps(in:request),result.historyOffset>0 {
-            if steps != result.historyOffset {result.targetAppID=""}
-            else if history.indices.contains(steps-1) {result.targetAppID=history[steps-1].id}
-            else if steps==1 && history.isEmpty {let matches=apps.filter {$0.name==previous};result.targetAppID=matches.count==1 ? matches[0].id : ""}
-            else {result.targetAppID=""}
-        } else if result.historyOffset>0 {result.targetAppID=""}
+        result=Self.bindHistory(result,request:request,apps:apps,previous:previous,history:history)
         let words=Set(request.lowercased().split{!$0.isLetter}.map(String.init))
         result.explainAfterSwitch = result.explainAfterSwitch && !words.isDisjoint(with:["explain","describe","summarize","read","what","tell"])
+        return result
+    }
+    static func bindHistory(_ proposed:DesktopRequest,request:String,apps:[DesktopApp],previous:String,history:[AppVisit]) -> DesktopRequest {
+        var result=proposed
+        if result.intent == .switchApp,let steps=AppTimeline.historySteps(in:request) {
+            // The user's reference and actual visits determine the destination,
+            // independently of a generated offset or app name.
+            result.historyOffset=steps
+            if history.indices.contains(steps-1) {result.targetAppID=history[steps-1].id}
+            else if steps==1 && history.isEmpty {let matches=apps.filter {$0.name==previous};result.targetAppID=matches.count==1 ? matches[0].id : ""}
+            else {result.targetAppID=""}
+        } else if result.historyOffset>0 {result.targetAppID="";result.historyOffset=0}
         return result
     }
     func answer(_ request:String, front:String, recent:String, previous:String="", frontPID:pid_t=0, history:[AppVisit]=[], authorized: @escaping @MainActor ()->Bool) async throws -> String {
@@ -167,10 +175,13 @@ struct DesktopApp: Equatable {
             onStatus?("Switching to \(target.name)…")
             let result=await activate(target,authorized:authorized)
             guard result else {return "I couldn't verify that \(target.name) came to the front. I haven't retried it."}
+            onSwitch?(target,decision.historyOffset)
             if front != target.name {lastSwitch=(front,target.name)}
             if decision.explainAfterSwitch {
                 return "\(target.name) is in front. " + (try await explain(request,app:target.name,pid:target.pid,authorized:authorized))
             }
+            if decision.historyOffset==1 {return "\(target.name) is in front. That was your previous app."}
+            if decision.historyOffset>1 {return "\(target.name) is in front. That was \(decision.historyOffset) app switches ago."}
             return "\(target.name) is in front."
         case .explainScreen:
             return try await explain(request,app:front,pid:frontPID,authorized:authorized)

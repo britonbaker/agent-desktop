@@ -25,7 +25,9 @@ struct AppTimeline:Codable {
             }
             if i+2<words.count,["last","previous"].contains(words[i+1]),["app","application"].contains(words[i+2]) {return count}
         }
-        let phrases=["previous app","previous application","last app","app i was using","application i was using","app we were using","app we were just using","app we just used","app i just used","app from before","last used app","what we were just using","what i was just using","the one we were just in"]
+        let relative="(?:app|application|one)(?: that)? (?:i|we) (?:was |were |had been )?(?:just )?(?:using|used|in)"
+        if text.range(of:relative,options:.regularExpression) != nil {return 1}
+        let phrases=["previous app","previous application","last app","last application","app from before","application from before","last used app","what we were just using","what i was just using","the one before this","the app before this","the application before this","the one before","the last one","the previous one"]
         if phrases.contains(where:text.contains) || ["go back","take me back","switch back","back"].contains(text) {return 1}
         return nil
     }

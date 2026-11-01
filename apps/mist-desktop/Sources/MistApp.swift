@@ -8,6 +8,11 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if let index=CommandLine.arguments.firstIndex(of:"--app-destination-test"),CommandLine.arguments.count>index+1 {
+            let id=CommandLine.arguments[index+1]
+            if let app=DesktopAgent.runningApps().first(where:{$0.id==id}),let target=DockDestination.anchor(for:app) {print("Destination:",app.name,target.source,target.point);exit(0)}
+            print("No readable Dock tile or window for",id);exit(1)
+        }
         if let index=CommandLine.arguments.firstIndex(of:"--voice-audition"),CommandLine.arguments.count>index+1 {
             Task {do {try await writeVoiceAudition(to:CommandLine.arguments[index+1]);exit(0)} catch {print("Voice audition failed:",error);exit(1)}}
             RunLoop.main.run();return
@@ -116,6 +121,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var responseTask: Task<Void, Never>?
     private var state = "idle"
     private var reply = ""
+    private var lastRequest = ""
     private var recentTurns = ""
     private var statusItem: NSStatusItem!
     private var idleTimer: Timer?
@@ -185,6 +191,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         loadCompanion()
         panel.orderFrontRegardless()
         audio.onTurn = { [weak self] text in self?.respond(text) }
+        desktopAgent.onSwitch = { [weak self] target,_ in self?.driveScout(to:target) }
         audio.onFailure = { [weak self] message in self?.conversationActive=false;self?.update("error", message) }
         audio.onStatus = { [weak self] message in
             guard let self else { return }
@@ -380,6 +387,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func explainWindow() { respond("Explain the page or window I am looking at. Start with its main content and what I can do next.") }
     @objc private func showLastReply() {
         let alert=NSAlert();alert.messageText="Rove";alert.informativeText=reply.isEmpty ? "No spoken reply yet. Double-tap or press Talk to ask a question." : reply
+        if !lastRequest.isEmpty {alert.informativeText += "\n\nRequest heard: " + lastRequest}
         if !desktopAgent.lastSource.isEmpty {alert.informativeText += "\n\nSource: " + desktopAgent.lastSource}
         alert.addButton(withTitle:"Done");alert.runModal()
     }
@@ -428,6 +436,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         } catch { update("error", error.localizedDescription) }
     }
     private func respond(_ text: String) {
+        lastRequest=text
         let normalized = TurnPolicy.normalized(text)
         if ["stop", "cancel", "end conversation", "be quiet"].contains(normalized) { stop(); return }
         let keepFace=scout?.faceRequested ?? false, keepConversation=conversationActive
@@ -520,6 +529,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     @objc private func parkRover() {
+        scout?.roofFace=false
         greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
         rover.maximumSpeed=125;rover.acceleration=230
@@ -611,6 +621,20 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         driveRoute = [bounded(CGPoint(x:p.x+140*direction,y:p.y)),bounded(CGPoint(x:p.x+140*direction,y:p.y+110)),bounded(CGPoint(x:p.x,y:p.y+110)),p]
         rover.target = driveRoute.removeFirst(); startDriveTimer()
     }
+    private func driveScout(to app:DesktopApp) {
+        guard companionID=="scout",let scout else {return}
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {return}
+        guard let anchor=DockDestination.anchor(for:app)?.point,
+              let screen=NSScreen.screens.first(where:{$0.frame.contains(anchor)}),screen==panel.screen else {return}
+        parkRover();scout.roofFace=true
+        let area=screen.visibleFrame
+        // Park on the desktop side of the tile, leaving the real Dock clickable.
+        let center=CGPoint(x:min(area.maxX-75,max(area.minX+75,anchor.x)),y:min(area.maxY-200,max(area.minY+200,anchor.y)))
+        let destination=CGPoint(x:center.x-150,y:center.y-200)
+        rover.position=panel.frame.origin;rover.target=destination
+        rover.maximumSpeed=210;rover.acceleration=260
+        startDriveTimer()
+    }
     private func bounded(_ point: CGPoint) -> CGPoint {
         guard let area = (panel.screen ?? NSScreen.main)?.visibleFrame else { return point }
         let padding=companionID == "scout" ? 112.0 : 0
@@ -626,6 +650,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if !moving {
                 if self.driveRoute.isEmpty {
                     timer.invalidate();self.driveTimer=nil
+                    self.scout?.roofFace=false
                     if self.isWandering {self.isWandering=false;self.nextWander=Date().addingTimeInterval(Double.random(in:5...10))}
                 }
                 else { self.rover.target = self.driveRoute.removeFirst() }

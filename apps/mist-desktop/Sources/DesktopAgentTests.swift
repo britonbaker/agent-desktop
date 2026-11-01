@@ -35,6 +35,15 @@ import FoundationModels
     let compound=try await agent.plan("Bring Safari up and explain what is on its page",apps:apps,recent:"",front:"Finder")
     try require(compound.intent == .switchApp && compound.targetAppID == "com.apple.Safari" && compound.explainAfterSwitch,"Switch then explain: \(compound.intent), \(compound.targetAppID), \(compound.explainAfterSwitch)")
     let visits=[AppVisit(id:"com.google.Chrome",name:"Google Chrome",time:3),AppVisit(id:"com.apple.finder",name:"Finder",time:2),AppVisit(id:"com.apple.Safari",name:"Safari",time:1)]
+    for offset in [0,1,3] {
+        let proposal=DesktopRequest(intent:.switchApp,targetAppID:"com.apple.finder",explainAfterSwitch:false,historyOffset:offset)
+        let bound=DesktopAgent.bindHistory(proposal,request:"Switch to the app that we were just using",apps:apps,previous:"",history:visits)
+        try require(bound.historyOffset==1 && bound.targetAppID=="com.google.Chrome","Actual history must bind even a missing or wrong generated offset")
+    }
+    for text in ["Switch to the app that we were just using","Go to the application I was just using","Bring back the one we were in","Take me to the last application","Switch to the one before this"] {
+        let result=try await agent.plan(text,apps:apps,recent:"",front:"Finder",history:visits)
+        try require(result.intent == .switchApp && result.historyOffset==1 && result.targetAppID=="com.google.Chrome","Natural recent-app wording: \(text)")
+    }
     for (text,offset,id) in [("Switch to the app we were just using",1,"com.google.Chrome"),("Take me to three apps ago",3,"com.apple.Safari"),("Go back three apps and explain the page",3,"com.apple.Safari")] {
         let result=try await agent.plan(text,apps:apps,recent:"",front:"Finder",history:visits)
         try require(result.intent == .switchApp && result.historyOffset==offset && result.targetAppID==id,"App history route: \(text) -> \(result.historyOffset), \(result.targetAppID)")

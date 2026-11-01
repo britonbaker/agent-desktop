@@ -5,6 +5,8 @@ import ApplicationServices
 struct FrontWindow {
     let id:CGWindowID
     let title:String
+    let bounds:CGRect
+    var desktopFrame:CGRect {CGRect(x:bounds.minX,y:(NSScreen.screens.first?.frame.maxY ?? 0)-bounds.maxY,width:bounds.width,height:bounds.height)}
     static func underlyingApp() -> NSRunningApplication? {
         let windows=CGWindowListCopyWindowInfo(.optionOnScreenOnly,kCGNullWindowID) as? [[String:Any]] ?? []
         for window in windows {
@@ -51,8 +53,8 @@ struct FrontWindow {
             guard let rect=bounds(window) else {return false}
             return rect.width>=320 && rect.height>=180
         }
-        if let window=chosen,let id=window[kCGWindowNumber as String] as? NSNumber {
-            return FrontWindow(id:id.uint32Value,title:window[kCGWindowName as String] as? String ?? "Front window")
+        if let window=chosen,let id=window[kCGWindowNumber as String] as? NSNumber,let rect=bounds(window) {
+            return FrontWindow(id:id.uint32Value,title:window[kCGWindowName as String] as? String ?? "Front window",bounds:rect)
         }
         return nil
     }

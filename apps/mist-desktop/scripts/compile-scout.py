@@ -9,6 +9,18 @@ body=re.sub(r'^precision .*?;\n|^uniform .*?;\n','',body,flags=re.M)
 body=body.replace('smoothstep(1.78,3.055,max(0.,rear))','smoothstep(.25,1.10,max(0.,rear))')
 body=body.replace('scKitRoll=scKitOn && mode==7.?angle-.106*sin(angle):0.;','scKitRoll=U.pose.y/(U.viewport.z*.295);')
 body=re.sub(r'float scoutTravel\(float age\)\{.*?\n}', 'float scoutTravel(float age){return max(0.,U.pose.y/U.viewport.z);}',body,flags=re.S)
+# Reuse the authored face ink on the existing roof glass; no separate face overlay.
+body=body.replace('vec3 roofNavigation(vec2 s,vec3 v){','float scoutLcdInk(vec2 cell,float age,vec2 look);\nvec3 roofNavigation(vec2 s,vec3 v){')
+body=body.replace('vec2 q=vec2(-s.x,s.y);','''vec2 q=vec2(-s.x,s.y);
+    if(U.mechanics.w>.5){
+        vec2 g=q/vec2(.009,.007)+vec2(32.,24.);
+        float ink=scoutLcdInk(floor(g),uSince,vec2(0.));
+        float dotMask=1.-smoothstep(.34,.49,max(abs(fract(g).x-.5),abs(fract(g).y-.5)));
+        return vec3(.009,.012,.015)+scoutAmber*ink*mix(.72,1.,dotMask);
+    }''')
+body=body.replace('float kitInk(vec2 px,float style,float mode,float time) {','''float kitInk(vec2 px,float style,float mode,float time) {
+    if(U.mechanics.w>.5)return scoutLcdInk(px,time,vec2(0.));''')
+body=body.replace('vec2 grid=style<5.5?vec2(25.,14.):style<6.5?vec2(64.,12.):vec2(19.,28.);','vec2 grid=U.mechanics.w>.5?vec2(64.,48.):style<5.5?vec2(25.,14.):style<6.5?vec2(64.,12.):vec2(19.,28.);')
 camera='''vec3 worldToScout(vec3 p) {
  float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
  float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
@@ -32,7 +44,7 @@ layout(location=0) out vec4 outputColor;
 layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 viewport; vec4 eye; vec4 pose; vec4 options;
  vec4 outfit; // optics, paint, face, lamp power
- vec4 mechanics; // lamp hinge, shadow enabled, track fade, unused
+ vec4 mechanics; // lamp hinge, shadow enabled, track fade, roof face
 } U;
 #define uResolution U.viewport.xy
 #define uEvent U.pose.z
