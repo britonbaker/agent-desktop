@@ -63,7 +63,7 @@ Idle face animation is capped around 20 frames per second, active animation arou
 
 ## Scout driving prototype
 
-Scout rests flat in a top-down survey view. Position and hinge angle add subtle parallax, capped at seven degrees from overhead. Display dimensions set physical scale: one model unit is 11 mm, about 40 percent smaller than the earlier version. Moving him across the screen changes perspective without stretching his geometry. Guide him by dragging; the native drive controller steers and brakes toward the destination instead of applying the floating companion's release momentum. The menu offers **Drive Scout in a small loop** and **Park Scout**. Stop, listening, switching companions, and quitting cancel the route. Movement stays inside the current screen's visible frame.
+Scout rests flat in a top-down survey view. Position and hinge angle add subtle parallax, capped at seven degrees from overhead. Display dimensions set physical scale: one model unit is 11 mm, about 40 percent smaller than the earlier version. Moving him across the screen changes perspective without stretching his geometry. Guide him by dragging; the native drive controller steers and brakes toward the destination instead of applying the floating companion's release momentum. The menu offers **Drive Scout in a small loop**, **Let Scout wander** and **Park Scout**. Stop, listening, switching companions, and quitting cancel the route. Movement stays inside the current screen's visible frame.
 
 Wheel tread and hub rotation follow traveled distance and tire radius. Two emissive lamps attach to the upper front edge of the chassis. Ground-plane cones, body shadow and wheel-contact shadows use the same projection. This is a visual lighting approximation; it does not change other apps' pixels. Clicking Scout lifts him and turns him toward you, with the shadow fading as wheel contact breaks. Talk, the explanation command and double-tapping keep the survey view and roof readout visible. Stop returns him to the display. Reduced Motion snaps between these poses.
 
@@ -108,3 +108,13 @@ Follow-up listening and activation need separate live checks; the silent self-te
 
 
 Live development checks brought Finder forward from a natural typed request and obtained a conversational explanation of Finder's accessible contents. Foreground acknowledgment was verified in the runtime before speech. Physical speech-recognition accuracy still requires user validation; typed requests exercise the same routing and action layer without establishing recognition accuracy.
+
+
+## Idle movement and compact controls
+
+Scout takes short idle drives around the spot where you placed him, with pauses between trips. Idle speed is limited to 20–30 points per second with slower acceleration than dragging. The existing steering, braking, tread rotation and contact shadows are reused. Destinations remain within the current display's visible frame. Dragging establishes a new home area.
+
+Wandering pauses while the pointer is near Scout or his controls, while the text input is open, during a conversation, while a modal dialog is open, and when Reduce Motion is enabled. **Park Scout** disables automatic wandering; **Let Scout wander** turns it back on. That preference persists. The existing rounded control is now positioned just below the smaller rover, with compact button sizing and a circular, inset close affordance inside the expanded text capsule.
+
+
+Live window-position sampling observed ten distinct positions during a 15-second idle check, and one position during a separate 15-second check with the text input open and the pointer elsewhere. The minimized and expanded capsules were visually reviewed. Transparent window padding lets mouse clicks pass through to the app underneath; mouse interaction regions surround the rover and controls.

@@ -6,6 +6,8 @@ struct RoverDrive {
     var heading = 0.0
     var speed = 0.0
     var distance = 0.0
+    var maximumSpeed = 125.0
+    var acceleration = 230.0
     mutating func park() { target = nil; speed = 0 }
     mutating func step(_ elapsed: Double) -> Bool {
         guard let target else { return false }
@@ -18,8 +20,8 @@ struct RoverDrive {
         while turn > .pi { turn -= 2 * .pi }
         while turn < -.pi { turn += 2 * .pi }
         heading += min(2.8 * dt, max(-2.8 * dt, turn))
-        let wanted = min(125, sqrt(2 * 230 * remaining)) * max(0, cos(turn))
-        speed += min(230 * dt, max(-230 * dt, wanted - speed))
+        let wanted = min(maximumSpeed, sqrt(2 * acceleration * remaining)) * max(0, cos(turn))
+        speed += min(acceleration * dt, max(-acceleration * dt, wanted - speed))
         let travel = min(remaining, speed * dt)
         position.x += sin(heading) * travel
         position.y += cos(heading) * travel

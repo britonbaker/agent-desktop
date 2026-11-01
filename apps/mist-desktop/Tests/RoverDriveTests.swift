@@ -18,6 +18,11 @@ import CoreGraphics
         var delayed = RoverDrive(position:CGPoint(x:0,y:0),target:CGPoint(x:0,y:100))
         _ = delayed.step(1)
         precondition(delayed.speed <= 230*0.05+0.001)
+        var idle = RoverDrive(position:.zero,target:CGPoint(x:100,y:0))
+        idle.maximumSpeed=24;idle.acceleration=45
+        var idlePeak=0.0
+        for _ in 0..<1800 {_ = idle.step(1/60);idlePeak=max(idlePeak,idle.speed)}
+        precondition(idlePeak<=24 && idle.target==nil && abs(idle.position.x-100)<2)
         print("PASS: rover arrival, braking, speed cap, distance, parking, turn limit and stalled-frame bound")
     }
 }
