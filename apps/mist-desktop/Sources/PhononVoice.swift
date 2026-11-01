@@ -4,8 +4,8 @@ import PhononTTS
 enum RoveSpeechVoice {
     static let available=["Micah","Miles","Trevor"]
     static var selected:String {
-        let saved=UserDefaults.standard.string(forKey:"roveSpeechVoice") ?? "Micah"
-        return available.contains(saved) ? saved : "Micah"
+        let saved=UserDefaults.standard.string(forKey:"roveSpeechVoice") ?? "Miles"
+        return available.contains(saved) ? saved : "Miles"
     }
 }
 
@@ -33,6 +33,7 @@ actor PhononModel {
 }
 
 final class PhononVoice {
+    private(set) var lastVoiceName="not spoken yet"
     private var task: Task<Void, Never>?
     private var revision = 0
     func cancel() { revision += 1; task?.cancel(); task = nil }
@@ -45,10 +46,12 @@ final class PhononVoice {
                 let name=RoveSpeechVoice.selected
                 if model.voice != name {try await model.setVoice(name)}
                 try Task.checkCancellation()
+                self?.lastVoiceName=model.voice
+                var character=RobotVoiceEffect()
                 for try await chunk in model.stream(text) {
                     try Task.checkCancellation()
                     guard let self, self.revision == ticket else { return }
-                    onChunk(chunk)
+                    onChunk(character.process(chunk))
                 }
                 guard let self, self.revision == ticket, !Task.isCancelled else { return }
                 self.task = nil; completion(nil)

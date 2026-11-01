@@ -7,7 +7,7 @@ enum RobotChirp {
     static func samples(variant:Int) -> [Float] {
         let kind=((variant%3)+3)%3,duration=0.43
         var phase=0.0,servoPhase=0.0
-        return (0..<Int(duration*Double(sampleRate))).map {index in
+        let dry:[Float]=(0..<Int(duration*Double(sampleRate))).map {index in
             let t=Double(index)/Double(sampleRate),second=t>=0.19
             let local=second ? t-0.21 : t,length=second ? 0.22 : 0.17
             guard local>=0,local<length else {return 0}
@@ -35,6 +35,8 @@ enum RobotChirp {
             let signal=tanh(1.4*body)*0.25*texture+sin(servoPhase)*0.015
             return Float(signal*envelope)
         }
+        var character=RobotVoiceEffect()
+        return character.process(dry)
     }
     static func wav(variant:Int) -> Data {
         let pcm=samples(variant:variant)

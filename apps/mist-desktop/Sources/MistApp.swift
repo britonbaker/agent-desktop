@@ -8,6 +8,12 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if let index=CommandLine.arguments.firstIndex(of:"--app-catalog-test"),CommandLine.arguments.count>index+1 {
+            let name=CommandLine.arguments[index+1]
+            let matches=DesktopAgent.availableApps().filter {$0.name.localizedCaseInsensitiveCompare(name) == .orderedSame}
+            for app in matches {print(app.name,app.id,"PID",app.pid,app.bundleURL?.path ?? "running")}
+            exit(matches.count==1 ? 0 : 1)
+        }
         if let index=CommandLine.arguments.firstIndex(of:"--character-voice-previews"),CommandLine.arguments.count>index+1 {
             Task {do {try await writeCharacterVoicePreviews(directory:CommandLine.arguments[index+1]);exit(0)} catch {print("Voice previews failed:",error);exit(1)}}
             RunLoop.main.run();return
@@ -416,6 +422,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func showLastReply() {
         let alert=NSAlert();alert.messageText="Rove";alert.informativeText=reply.isEmpty ? "No spoken reply yet. Double-tap or press Talk to ask a question." : reply
         if !lastRequest.isEmpty {alert.informativeText += "\n\nRequest heard: " + lastRequest}
+        alert.informativeText += "\n\nVoice actually used: \(audio.voice.lastVoiceName) · local Gradium\nSelected voice: \(RoveSpeechVoice.selected)"
         if !desktopAgent.lastSource.isEmpty {alert.informativeText += "\n\nSource: " + desktopAgent.lastSource}
         alert.addButton(withTitle:"Done");alert.runModal()
     }

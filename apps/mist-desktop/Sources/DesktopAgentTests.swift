@@ -7,6 +7,11 @@ import FoundationModels
     }
     let apps=[DesktopApp(id:"com.apple.finder",name:"Finder",pid:1),DesktopApp(id:"com.apple.Safari",name:"Safari",pid:2),DesktopApp(id:"com.google.Chrome",name:"Google Chrome",pid:3)]
     let agent=DesktopAgent()
+    let discord=DesktopApp(id:"com.hnc.Discord",name:"Discord",pid:0,bundleURL:URL(fileURLWithPath:"/Applications/Discord.app"))
+    let launch=DesktopAgent.directRequest("Can you switch to discord",apps:apps+[discord],previous:"",history:[])
+    try require(launch?.intent == .switchApp && launch?.targetAppID==discord.id,"Resolve an installed Discord even when it is not running")
+    print("PASS installed app route: Can you switch to discord ->",discord.id)
+    try require(DesktopAgent.resolve(discord.id,in:apps+[discord,discord])==nil,"Reject ambiguous installed target")
     try require(DesktopAgent.resolve("com.apple.finder",in:apps)?.name=="Finder","Exact target resolution")
     try require(DesktopAgent.resolve("Finder; rm -rf",in:apps)==nil,"Reject arbitrary identifiers")
     try require(DesktopAgent.resolve("com.apple.finder",in:apps+[apps[0]])==nil,"Reject ambiguous target")
