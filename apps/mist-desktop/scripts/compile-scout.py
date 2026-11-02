@@ -28,14 +28,16 @@ camera='''vec3 worldToScout(vec3 p) {
  float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
  float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
  float cr=cos(U.wall.y),sr=sin(U.wall.y);p=vec3(cr*p.x+sr*p.y,-sr*p.x+cr*p.y,p.z);
- float a=U.pose.w*1.5707963+U.options.z+U.wall.x,cx=cos(a),sx=sin(a);
+ float a=U.pose.w*1.30+U.options.z+U.options.w+U.wall.x,cx=cos(a),sx=sin(a);
  return vec3(p.x,cx*p.y-sx*p.z,sx*p.y+cx*p.z);
 }
 vec3 scoutPoint(vec3 p){
  float rise=U.wall.z-.767*(1.-cos(U.wall.x)*cos(U.wall.y));
- p=worldToScout(p-vec3(0.,U.pose.w*1.05+rise,0.));
- float a=U.options.z,c=cos(a),s=sin(a);vec3 pivot=vec3(0.,-.472,-.431);
- return p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z);
+ p=worldToScout(p-vec3(0.,rise,0.));
+ float a=U.pose.w*1.30+U.options.z+U.options.w,c=cos(a),s=sin(a);vec3 pivot=vec3(0.,-.472,-.431);
+ float h=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
+ vec3 wheelTranslation=worldToScout(vec3(sin(h)*U.wall.w,0.,cos(h)*U.wall.w));
+ return p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z)-wheelTranslation;
 }
 void scCamera(vec2 uv,vec2 orbit,out vec3 ro,out vec3 rd){
  vec3 ground=vec3(uv.x,-.767,uv.y);ro=scoutPoint(U.eye.xyz);rd=worldToScout(normalize(ground-U.eye.xyz));
@@ -50,7 +52,7 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 viewport; vec4 eye; vec4 pose; vec4 options;
  vec4 outfit; // optics, paint, face, lamp power
  vec4 mechanics; // lamp hinge, shadow enabled, track fade, roof face
- vec4 wall; // contact pitch, bank, rise, reserved
+ vec4 wall; // contact pitch, bank, rise, balance wheel travel
  vec4 receiver; // rover center in receiver points, reserved, pass (0 body, 1 floor, 2 proof)
 } U;
 #define uResolution U.viewport.xy

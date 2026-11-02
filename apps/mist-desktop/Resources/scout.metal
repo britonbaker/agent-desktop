@@ -73,7 +73,7 @@ float3 worldToScout(thread float3& p, constant NativeUniforms& U)
     float cr = cos(U.wall.y);
     float sr = sin(U.wall.y);
     p = float3((cr * p.x) + (sr * p.y), ((-sr) * p.x) + (cr * p.y), p.z);
-    float a = ((U.pose.w * 1.5707962512969970703125) + U.options.z) + U.wall.x;
+    float a = (((U.pose.w * 1.2999999523162841796875) + U.options.z) + U.options.w) + U.wall.x;
     float cx = cos(a);
     float sx = sin(a);
     return float3(p.x, (cx * p.y) - (sx * p.z), (sx * p.y) + (cx * p.z));
@@ -83,14 +83,18 @@ static inline __attribute__((always_inline))
 float3 scoutPoint(thread float3& p, constant NativeUniforms& U)
 {
     float rise = U.wall.z - (0.767000019550323486328125 * (1.0 - (cos(U.wall.x) * cos(U.wall.y))));
-    float3 param = p - float3(0.0, (U.pose.w * 1.0499999523162841796875) + rise, 0.0);
-    float3 _6509 = worldToScout(param, U);
-    p = _6509;
-    float a = U.options.z;
+    float3 param = p - float3(0.0, rise, 0.0);
+    float3 _6506 = worldToScout(param, U);
+    p = _6506;
+    float a = ((U.pose.w * 1.2999999523162841796875) + U.options.z) + U.options.w;
     float c = cos(a);
     float s = sin(a);
     float3 pivot = float3(0.0, -0.47200000286102294921875, -0.4309999942779541015625);
-    return (p + pivot) - float3(pivot.x, (c * pivot.y) - (s * pivot.z), (s * pivot.y) + (c * pivot.z));
+    float h = U.pose.x + (precise::atan2(sin(3.1415927410125732421875 - U.pose.x), cos(3.1415927410125732421875 - U.pose.x)) * U.pose.w);
+    float3 param_1 = float3(sin(h) * U.wall.w, 0.0, cos(h) * U.wall.w);
+    float3 _6556 = worldToScout(param_1, U);
+    float3 wheelTranslation = _6556;
+    return ((p + pivot) - float3(pivot.x, (c * pivot.y) - (s * pivot.z), (s * pivot.y) + (c * pivot.z))) - wheelTranslation;
 }
 
 static inline __attribute__((always_inline))
@@ -98,11 +102,11 @@ void scCamera(thread const float2& uv, thread const float2& orbit, thread float3
 {
     float3 ground = float3(uv.x, -0.767000019550323486328125, uv.y);
     float3 param = U.eye.xyz;
-    float3 _6562 = scoutPoint(param, U);
-    ro = _6562;
+    float3 _6598 = scoutPoint(param, U);
+    ro = _6598;
     float3 param_1 = fast::normalize(ground - U.eye.xyz);
-    float3 _6570 = worldToScout(param_1, U);
-    rd = _6570;
+    float3 _6606 = worldToScout(param_1, U);
+    rd = _6606;
 }
 
 static inline __attribute__((always_inline))
@@ -607,16 +611,16 @@ float2 liftLampDeck(thread const float2& stock, thread const float3& p)
     float param_2 = 0.01200000010430812835693359375;
     float outline = scRect(param, param_1, param_2);
     float cutter = fast::max(outline, 0.4309999942779541015625 - p.y);
-    float2 _7843;
+    float2 _7879;
     if ((-cutter) > stock.x)
     {
-        _7843 = float2(-cutter, 43.0);
+        _7879 = float2(-cutter, 43.0);
     }
     else
     {
-        _7843 = stock;
+        _7879 = stock;
     }
-    return _7843;
+    return _7879;
 }
 
 static inline __attribute__((always_inline))
@@ -773,16 +777,16 @@ float2 kitWindow(thread const float& style)
 static inline __attribute__((always_inline))
 float kitWindowRadius(thread const float& style)
 {
-    float _8919;
+    float _8955;
     if (style < 5.5)
     {
-        _8919 = 0.017999999225139617919921875;
+        _8955 = 0.017999999225139617919921875;
     }
     else
     {
-        _8919 = (style < 6.5) ? 0.01200000010430812835693359375 : 0.014999999664723873138427734375;
+        _8955 = (style < 6.5) ? 0.01200000010430812835693359375 : 0.014999999664723873138427734375;
     }
-    return _8919;
+    return _8955;
 }
 
 static inline __attribute__((always_inline))
@@ -801,26 +805,26 @@ float2 kitDisplayMap(thread const float3& p, thread const float& style)
     {
         return float2(20.0, 110.0);
     }
-    float3 _8959;
+    float3 _8995;
     if (style < 5.5)
     {
-        _8959 = float3(0.3459999859333038330078125, 0.605000019073486328125, -0.1689999997615814208984375);
+        _8995 = float3(0.3459999859333038330078125, 0.605000019073486328125, -0.1689999997615814208984375);
     }
     else
     {
-        _8959 = select(float3(0.3670000135898590087890625, 0.658999979496002197265625, -0.14699999988079071044921875), float3(0.1369999945163726806640625, 0.5950000286102294921875, 0.05200000107288360595703125), bool3(style < 6.5));
+        _8995 = select(float3(0.3670000135898590087890625, 0.658999979496002197265625, -0.14699999988079071044921875), float3(0.1369999945163726806640625, 0.5950000286102294921875, 0.05200000107288360595703125), bool3(style < 6.5));
     }
-    float3 bc = _8959;
-    float3 _8976;
+    float3 bc = _8995;
+    float3 _9012;
     if (style < 5.5)
     {
-        _8976 = float3(0.20499999821186065673828125, 0.1550000011920928955078125, 0.119999997317790985107421875);
+        _9012 = float3(0.20499999821186065673828125, 0.1550000011920928955078125, 0.119999997317790985107421875);
     }
     else
     {
-        _8976 = select(float3(0.16500000655651092529296875, 0.20700000226497650146484375, 0.119999997317790985107421875), float3(0.384000003337860107421875, 0.1410000026226043701171875, 0.0949999988079071044921875), bool3(style < 6.5));
+        _9012 = select(float3(0.16500000655651092529296875, 0.20700000226497650146484375, 0.119999997317790985107421875), float3(0.384000003337860107421875, 0.1410000026226043701171875, 0.0949999988079071044921875), bool3(style < 6.5));
     }
-    float3 bh = _8976;
+    float3 bh = _9012;
     float3 param = p - bc;
     float3 param_1 = bh;
     float param_2 = 0.0;
@@ -849,18 +853,18 @@ float2 kitDisplayMap(thread const float3& p, thread const float& style)
     float2 win = kitWindow(param_10);
     float param_11 = style;
     float wr = kitWindowRadius(param_11);
-    float _9058;
+    float _9094;
     if (style < 5.5)
     {
-        _9058 = 0.026000000536441802978515625;
+        _9094 = 0.026000000536441802978515625;
     }
     else
     {
-        _9058 = (style < 6.5) ? 0.017999999225139617919921875 : 0.02500000037252902984619140625;
+        _9094 = (style < 6.5) ? 0.017999999225139617919921875 : 0.02500000037252902984619140625;
     }
     float3 param_12 = q;
     float3 param_13 = h;
-    float param_14 = _9058;
+    float param_14 = _9094;
     float shell = scBox(param_12, param_13, param_14);
     float2 param_15 = s;
     float2 param_16 = win + float2(0.0040000001899898052215576171875);
@@ -2434,26 +2438,26 @@ float3 scLCD(thread const float3& p, thread const float3& v, thread const float&
 static inline __attribute__((always_inline))
 float kitDigit(thread const float2& cell, thread const float& digit)
 {
-    bool _9413 = fast::min(cell.x, cell.y) < 0.0;
-    bool _9420;
-    if (!_9413)
+    bool _9449 = fast::min(cell.x, cell.y) < 0.0;
+    bool _9456;
+    if (!_9449)
     {
-        _9420 = cell.x > 2.0;
+        _9456 = cell.x > 2.0;
     }
     else
     {
-        _9420 = _9413;
+        _9456 = _9449;
     }
-    bool _9427;
-    if (!_9420)
+    bool _9463;
+    if (!_9456)
     {
-        _9427 = cell.y > 4.0;
+        _9463 = cell.y > 4.0;
     }
     else
     {
-        _9427 = _9420;
+        _9463 = _9456;
     }
-    if (_9427)
+    if (_9463)
     {
         return 0.0;
     }
@@ -2553,46 +2557,46 @@ float kitInk(thread const float2& px, thread const float& style, thread const fl
     bool search = mode == 6.0;
     bool drive = mode == 7.0;
     bool scan = ((mode == 2.0) || (mode == 5.0)) || search;
-    float _9566;
+    float _9602;
     if (sleep)
     {
-        _9566 = 0.0;
+        _9602 = 0.0;
     }
     else
     {
-        _9566 = floor(fast::max(time, 0.0) * 3.0);
+        _9602 = floor(fast::max(time, 0.0) * 3.0);
     }
-    float tick = _9566;
+    float tick = _9602;
     if (style < 5.5)
     {
-        float _9581;
+        float _9617;
         if (drive)
         {
-            _9581 = 83.0 - fast::min(floor(tick / 16.0), 2.0);
+            _9617 = 83.0 - fast::min(floor(tick / 16.0), 2.0);
         }
         else
         {
-            float _9593;
+            float _9629;
             if (mode == 5.0)
             {
-                _9593 = 84.0 - fast::min(floor(tick / 5.0), 2.0);
+                _9629 = 84.0 - fast::min(floor(tick / 5.0), 2.0);
             }
             else
             {
-                float _9610;
+                float _9646;
                 if (((mode == 3.0) || search) || (mode == 2.0))
                 {
-                    _9610 = 85.0;
+                    _9646 = 85.0;
                 }
                 else
                 {
-                    _9610 = (mode == 1.0) ? 87.0 : 86.0;
+                    _9646 = (mode == 1.0) ? 87.0 : 86.0;
                 }
-                _9593 = _9610;
+                _9629 = _9646;
             }
-            _9581 = _9593;
+            _9617 = _9629;
         }
-        float charge = _9581;
+        float charge = _9617;
         float2 param_3 = px;
         float2 param_4 = float2(1.0, 2.0);
         float param_5 = floor(charge / 10.0);
@@ -2619,61 +2623,61 @@ float kitInk(thread const float2& px, thread const float& style, thread const fl
     }
     if (style < 6.5)
     {
-        float _9698;
+        float _9734;
         if (search)
         {
-            _9698 = 60.0 + mod(tick, 37.0);
+            _9734 = 60.0 + mod(tick, 37.0);
         }
         else
         {
-            float _9708;
+            float _9744;
             if (drive)
             {
-                _9708 = 20.0 + mod(floor(tick * 0.5), 32.0);
+                _9744 = 20.0 + mod(floor(tick * 0.5), 32.0);
             }
             else
             {
-                float _9719;
+                float _9755;
                 if (mode == 5.0)
                 {
-                    _9719 = 92.0 + fast::min(tick, 7.0);
+                    _9755 = 92.0 + fast::min(tick, 7.0);
                 }
                 else
                 {
-                    float _9729;
+                    float _9765;
                     if (mode == 2.0)
                     {
-                        _9729 = 41.0 + fast::min(floor(tick * 0.5), 7.0);
+                        _9765 = 41.0 + fast::min(floor(tick * 0.5), 7.0);
                     }
                     else
                     {
-                        float _9740;
+                        float _9776;
                         if (mode == 1.0)
                         {
-                            _9740 = 24.0;
+                            _9776 = 24.0;
                         }
                         else
                         {
-                            float _9746;
+                            float _9782;
                             if (mode == 3.0)
                             {
-                                _9746 = 52.0;
+                                _9782 = 52.0;
                             }
                             else
                             {
-                                _9746 = sleep ? 2.0 : 16.0;
+                                _9782 = sleep ? 2.0 : 16.0;
                             }
-                            _9740 = _9746;
+                            _9776 = _9782;
                         }
-                        _9729 = _9740;
+                        _9765 = _9776;
                     }
-                    _9719 = _9729;
+                    _9755 = _9765;
                 }
-                _9708 = _9719;
+                _9744 = _9755;
             }
-            _9698 = _9708;
+            _9734 = _9744;
         }
-        float val = _9698;
+        float val = _9734;
         float2 param_21 = px;
         float2 param_22 = float2(1.0);
         float param_23 = 0.0;
@@ -2688,17 +2692,17 @@ float kitInk(thread const float2& px, thread const float& style, thread const fl
         float2 param_31 = float2(25.0, 1.0);
         float2 param_32 = float2(25.0, 10.0);
         k_1 = fast::max(k_1, 0.23999999463558197021484375 * kitRectPix(param_30, param_31, param_32));
-        bool _9796 = px.x >= 29.0;
-        bool _9803;
-        if (_9796)
+        bool _9832 = px.x >= 29.0;
+        bool _9839;
+        if (_9832)
         {
-            _9803 = px.x <= 61.0;
+            _9839 = px.x <= 61.0;
         }
         else
         {
-            _9803 = _9796;
+            _9839 = _9832;
         }
-        if (_9803)
+        if (_9839)
         {
             float x = px.x - 29.0;
             float marker = mod(tick + (mode * 4.0), 33.0);
@@ -2714,61 +2718,61 @@ float kitInk(thread const float2& px, thread const float& style, thread const fl
         }
         return k_1 * (sleep ? 0.4600000083446502685546875 : 1.0);
     }
-    float _9898;
+    float _9934;
     if (drive)
     {
-        _9898 = 27.0 + floor((4.0 * sin(tick * 0.180000007152557373046875)) + 0.5);
+        _9934 = 27.0 + floor((4.0 * sin(tick * 0.180000007152557373046875)) + 0.5);
     }
     else
     {
-        float _9910;
+        float _9946;
         if (search)
         {
-            _9910 = 42.0 - fast::min(mod(tick, 18.0), 13.0);
+            _9946 = 42.0 - fast::min(mod(tick, 18.0), 13.0);
         }
         else
         {
-            float _9920;
+            float _9956;
             if (mode == 5.0)
             {
-                _9920 = 31.0 - fast::min(tick, 5.0);
+                _9956 = 31.0 - fast::min(tick, 5.0);
             }
             else
             {
-                float _9929;
+                float _9965;
                 if (mode == 2.0)
                 {
-                    _9929 = 35.0 - fast::min(floor(tick * 0.5), 3.0);
+                    _9965 = 35.0 - fast::min(floor(tick * 0.5), 3.0);
                 }
                 else
                 {
-                    float _9941;
+                    float _9977;
                     if (mode == 1.0)
                     {
-                        _9941 = 28.0;
+                        _9977 = 28.0;
                     }
                     else
                     {
-                        float _9947;
+                        float _9983;
                         if (mode == 3.0)
                         {
-                            _9947 = 34.0;
+                            _9983 = 34.0;
                         }
                         else
                         {
-                            _9947 = sleep ? 0.0 : 32.0;
+                            _9983 = sleep ? 0.0 : 32.0;
                         }
-                        _9941 = _9947;
+                        _9977 = _9983;
                     }
-                    _9929 = _9941;
+                    _9965 = _9977;
                 }
-                _9920 = _9929;
+                _9956 = _9965;
             }
-            _9910 = _9920;
+            _9946 = _9956;
         }
-        _9898 = _9910;
+        _9934 = _9946;
     }
-    float dist = _9898;
+    float dist = _9934;
     float2 param_36 = px;
     float2 param_37 = float2(1.0);
     float param_38 = floor(dist / 10.0);
@@ -2801,25 +2805,25 @@ float kitInk(thread const float2& px, thread const float& style, thread const fl
     float2 param_58 = float2(0.0, 2.0);
     float2 param_59 = float2(0.0, 4.0);
     float crosshair = fast::max(kitRectPix(param_54, param_55, param_56), kitRectPix(param_57, param_58, param_59));
-    float _10048;
+    float _10084;
     if (search)
     {
-        _10048 = floor((2.0 * sin(tick * 0.4199999868869781494140625)) + 0.5);
+        _10084 = floor((2.0 * sin(tick * 0.4199999868869781494140625)) + 0.5);
     }
     else
     {
-        float _10059;
+        float _10095;
         if (scan)
         {
-            _10059 = fast::max(0.0, 2.0 - floor(tick * 0.5));
+            _10095 = fast::max(0.0, 2.0 - floor(tick * 0.5));
         }
         else
         {
-            _10059 = 1.0;
+            _10095 = 1.0;
         }
-        _10048 = _10059;
+        _10084 = _10095;
     }
-    float pos = _10048;
+    float pos = _10084;
     float dotMark = (1.0 - step(0.4000000059604644775390625, abs(aim.x - pos))) * (1.0 - step(0.4000000059604644775390625, abs(aim.y)));
     return fast::max(k_2, fast::max(0.699999988079071044921875 * bracket, fast::max(0.689999997615814208984375 * crosshair, dotMark))) * (sleep ? 0.4600000083446502685546875 : 1.0);
 }
@@ -2857,41 +2861,41 @@ float3 kitScreen(thread const float3& p, thread const float3& view, thread const
     float3 color = float3(0.02500000037252902984619140625, 0.0199999995529651641845703125, 0.01400000043213367462158203125);
     if (inner < 0.0)
     {
-        float2 _10183;
+        float2 _10219;
         if (U.mechanics.w > 0.5)
         {
-            _10183 = float2(64.0, 48.0);
+            _10219 = float2(64.0, 48.0);
         }
         else
         {
-            float2 _10192;
+            float2 _10228;
             if (style < 5.5)
             {
-                _10192 = float2(25.0, 14.0);
+                _10228 = float2(25.0, 14.0);
             }
             else
             {
-                _10192 = select(float2(19.0, 28.0), float2(64.0, 12.0), bool2(style < 6.5));
+                _10228 = select(float2(19.0, 28.0), float2(64.0, 12.0), bool2(style < 6.5));
             }
-            _10183 = _10192;
+            _10219 = _10228;
         }
-        float2 grid = _10183;
+        float2 grid = _10219;
         float2 g = (((pos * 0.5) / win) + float2(0.5)) * grid;
         float2 i = floor(g);
         float2 f = fract(g);
         float2 stepTo = (step(float2(0.5), f) * 2.0) - float2(1.0);
         float footprint = fast::clamp(118.0 / (fast::max(140.0, U.viewport.y) * fast::max(0.300000011920928955078125, facing)), 0.100000001490116119384765625, 0.7400000095367431640625);
         float2 blend = fast::clamp(float2(1.0) - (fast::min(f, float2(1.0) - f) / float2(footprint)), float2(0.0), float2(1.0)) * 0.5;
-        float _10253;
+        float _10289;
         if (false)
         {
-            _10253 = 0.800000011920928955078125;
+            _10289 = 0.800000011920928955078125;
         }
         else
         {
-            _10253 = U.options.x;
+            _10289 = U.options.x;
         }
-        float clock = _10253;
+        float clock = _10289;
         float2 param_12 = i;
         float param_13 = style;
         float param_14 = U.pose.z;
@@ -2945,8 +2949,8 @@ float3 kitDisplaySurface(thread const float3& p, thread const float3& n, thread 
     float3 v = p - center;
     float3 q = float3(dot(v, right), dot(v, up), dot(v, front));
     float3 param_6 = float3(-0.550000011920928955078125, 0.7599999904632568359375, 0.4699999988079071044921875);
-    float3 _10444 = worldToScout(param_6, U);
-    float key = 0.319999992847442626953125 + (0.63999998569488525390625 * fast::max(dot(n, fast::normalize(_10444)), 0.0));
+    float3 _10480 = worldToScout(param_6, U);
+    float key = 0.319999992847442626953125 + (0.63999998569488525390625 * fast::max(dot(n, fast::normalize(_10480)), 0.0));
     float3 r = reflect(-view, n);
     float strip = exp((((-11.0) * (r.y - 0.61000001430511474609375)) * (r.y - 0.61000001430511474609375)) - ((3.400000095367431640625 * (r.x + 0.319999992847442626953125)) * (r.x + 0.319999992847442626953125)));
     float edge = 1.0 - fast::clamp(dot(n, view), 0.0, 1.0);
@@ -2977,16 +2981,16 @@ float3 kitDisplaySurface(thread const float3& p, thread const float3& n, thread 
     {
         return (float3(0.0430000014603137969970703125, 0.04500000178813934326171875, 0.041000001132488250732421875) * key) + float3(0.017999999225139617919921875 * strip);
     }
-    float3 _10573;
+    float3 _10609;
     if (style < 5.5)
     {
-        _10573 = float3(0.12999999523162841796875, 0.14499999582767486572265625, 0.12399999797344207763671875);
+        _10609 = float3(0.12999999523162841796875, 0.14499999582767486572265625, 0.12399999797344207763671875);
     }
     else
     {
-        _10573 = select(float3(0.18600000441074371337890625, 0.1550000011920928955078125, 0.108000002801418304443359375), float3(0.115000002086162567138671875, 0.13799999654293060302734375, 0.15600000321865081787109375), bool3(style < 6.5));
+        _10609 = select(float3(0.18600000441074371337890625, 0.1550000011920928955078125, 0.108000002801418304443359375), float3(0.115000002086162567138671875, 0.13799999654293060302734375, 0.15600000321865081787109375), bool3(style < 6.5));
     }
-    float3 base = _10573;
+    float3 base = _10609;
     float3 col = (base * key) + float3((0.0719999969005584716796875 * strip) + (0.017999999225139617919921875 * edge));
     float nd = dot(n, front);
     if (abs(nd) > 0.819999992847442626953125)
@@ -3085,24 +3089,24 @@ float3 headFinish(thread const float3& p, thread const float3& n, thread const f
     float3 param = select(m, p, bool3((style > 1.5) && (style < 2.5)));
     float param_1 = style;
     float3 q = hwPartFrame(param, param_1);
-    float3 _7107;
+    float3 _7143;
     if ((style > 1.5) && (style < 2.5))
     {
-        _7107 = v;
+        _7143 = v;
     }
     else
     {
-        _7107 = float3(v.x * ((p.x < 0.0) ? (-1.0) : 1.0), v.yz);
+        _7143 = float3(v.x * ((p.x < 0.0) ? (-1.0) : 1.0), v.yz);
     }
-    float3 vm = _7107;
+    float3 vm = _7143;
     float param_2 = style;
     float3 a = hwAxis(param_2);
     float3 ex = fast::normalize(float3(a.z, 0.0, -a.x));
     float3 ey = cross(a, ex);
     float3 eye = float3(dot(vm, ex), dot(vm, ey), dot(vm, a));
     float3 param_3 = float3(-0.5099999904632568359375, 0.89999997615814208984375, 0.680000007152557373046875);
-    float3 _7155 = worldToScout(param_3, U);
-    float light = fast::max(0.0, dot(n, fast::normalize(_7155)));
+    float3 _7191 = worldToScout(param_3, U);
+    float light = fast::max(0.0, dot(n, fast::normalize(_7191)));
     float3 param_4 = reflect(-v, n);
     float3 reflected = scEnv(param_4);
     float rim = powr(1.0 - fast::clamp(dot(n, v), 0.0, 1.0), 3.0);
@@ -3151,17 +3155,17 @@ float3 headFinish(thread const float3& p, thread const float3& n, thread const f
     }
     if (id < 24.5)
     {
-        bool _7385 = eye.z > 0.0;
-        bool _7392;
-        if (_7385)
+        bool _7421 = eye.z > 0.0;
+        bool _7428;
+        if (_7421)
         {
-            _7392 = q.z > (-0.007000000216066837310791015625);
+            _7428 = q.z > (-0.007000000216066837310791015625);
         }
         else
         {
-            _7392 = _7385;
+            _7428 = _7421;
         }
-        if (_7392)
+        if (_7428)
         {
             float2 screw = float2(abs(q.x) - 0.490999996662139892578125, q.y);
             float param_14 = length(screw) - 0.00999999977648258209228515625;
@@ -3229,8 +3233,8 @@ static inline __attribute__((always_inline))
 float3 liftLampSurface(thread const float3& p, thread const float3& n, thread const float3& view, thread const float& id, thread const float& power, thread float& kitLift, constant NativeUniforms& U)
 {
     float3 param = float3(-0.5099999904632568359375, 0.89999997615814208984375, 0.680000007152557373046875);
-    float3 _8098 = worldToScout(param, U);
-    float key = fast::max(0.0, dot(n, fast::normalize(_8098)));
+    float3 _8134 = worldToScout(param, U);
+    float key = fast::max(0.0, dot(n, fast::normalize(_8134)));
     float3 param_1 = reflect(-view, n);
     float3 env = scEnv(param_1);
     if (id == 47.0)
@@ -3311,17 +3315,17 @@ float kitPaintRelief(thread const float3& p, thread const float& key, thread con
 static inline __attribute__((always_inline))
 float3 kitPaintFinish(thread const float3& p, thread const float3& n, thread const float3& v, thread const float& id, thread const float3& stock, thread const float& paint, thread bool& scoutRoofHit, constant NativeUniforms& U)
 {
-    bool _8423 = scoutRoofHit || (paint < 0.5);
-    bool _8432;
-    if (!_8423)
+    bool _8459 = scoutRoofHit || (paint < 0.5);
+    bool _8468;
+    if (!_8459)
     {
-        _8432 = (id != 1.0) && (id != 47.0);
+        _8468 = (id != 1.0) && (id != 47.0);
     }
     else
     {
-        _8432 = _8423;
+        _8468 = _8459;
     }
-    if (_8432)
+    if (_8468)
     {
         return stock;
     }
@@ -3332,32 +3336,32 @@ float3 kitPaintFinish(thread const float3& p, thread const float3& n, thread con
     float3 param = reflection;
     float3 environment = scEnv(param);
     float3 param_1 = float3(-0.5099999904632568359375, 0.89999997615814208984375, 0.680000007152557373046875);
-    float3 _8461 = worldToScout(param_1, U);
-    float key = fast::max(dot(n, fast::normalize(_8461)), 0.0);
+    float3 _8497 = worldToScout(param_1, U);
+    float key = fast::max(dot(n, fast::normalize(_8497)), 0.0);
     float facing = fast::clamp(dot(n, v), 0.0, 1.0);
     float edge = 1.0 - facing;
     float diffuse = (((0.37999999523162841796875 + (0.14000000059604644775390625 * ((n.y * 0.5) + 0.5))) + (0.63999998569488525390625 * key)) + (0.064999997615814208984375 * fast::max(dot(n, float3(0.654892385005950927734375, 0.3929354250431060791015625, -0.64553678035736083984375)), 0.0))) * (0.87000000476837158203125 + (0.12999999523162841796875 * smoothstep(-0.20999999344348907470703125, 0.039999999105930328369140625, p.y)));
     diffuse *= mix(ivory ? 0.939999997615814208984375 : 0.7200000286102294921875, 1.0, smoothstep(-0.1599999964237213134765625, 0.430000007152557373046875, p.y));
-    float3 _8508;
+    float3 _8544;
     if (ivory)
     {
-        _8508 = float3(0.8849999904632568359375, 0.80400002002716064453125, 0.638000011444091796875);
+        _8544 = float3(0.8849999904632568359375, 0.80400002002716064453125, 0.638000011444091796875);
     }
     else
     {
-        _8508 = select(float3(0.7400000095367431640625, 0.014999999664723873138427734375, 0.017999999225139617919921875), float3(0.0089999996125698089599609375, 0.064999997615814208984375, 0.540000021457672119140625), bool3(blue));
+        _8544 = select(float3(0.7400000095367431640625, 0.014999999664723873138427734375, 0.017999999225139617919921875), float3(0.0089999996125698089599609375, 0.064999997615814208984375, 0.540000021457672119140625), bool3(blue));
     }
-    float3 pigment = _8508;
-    float _8523;
+    float3 pigment = _8544;
+    float _8559;
     if (ivory)
     {
-        _8523 = 0.14200000464916229248046875;
+        _8559 = 0.14200000464916229248046875;
     }
     else
     {
-        _8523 = blue ? 0.0570000000298023223876953125 : 0.03599999845027923583984375;
+        _8559 = blue ? 0.0570000000298023223876953125 : 0.03599999845027923583984375;
     }
-    float rough = _8523;
+    float rough = _8559;
     float3 param_2 = reflection;
     float3 param_3 = float3(-0.711458265781402587890625, 0.58998978137969970703125, 0.38175809383392333984375);
     float2 param_4 = float2(0.560000002384185791015625, 0.2199999988079071044921875);
@@ -3383,16 +3387,16 @@ float3 kitPaintFinish(thread const float3& p, thread const float3& n, thread con
     float shoulder = kitPaintPanel(param_16, param_17, param_18, param_19, param_20);
     float3 cards = (float3(1.0, 0.930000007152557373046875, 0.86000001430511474609375) * ((1.059999942779541015625 * first) + (2.2200000286102294921875 * shoulder))) + (float3(0.89999997615814208984375, 0.959999978542327880859375, 1.0) * ((0.7599999904632568359375 * rail) + (0.300000011920928955078125 * side)));
     float fresnel = (((edge * edge) * edge) * edge) * edge;
-    float _8627;
+    float _8663;
     if (ivory)
     {
-        _8627 = 0.034000001847743988037109375;
+        _8663 = 0.034000001847743988037109375;
     }
     else
     {
-        _8627 = blue ? 0.056000001728534698486328125 : 0.0670000016689300537109375;
+        _8663 = blue ? 0.056000001728534698486328125 : 0.0670000016689300537109375;
     }
-    float3 spec = ((environment * 0.89999997615814208984375) + (cards * 3.650000095367431640625)) * _8627;
+    float3 spec = ((environment * 0.89999997615814208984375) + (cards * 3.650000095367431640625)) * _8663;
     spec += ((((environment * 0.680000007152557373046875) + (cards * 1.2999999523162841796875)) * fresnel) * (ivory ? 0.25 : 0.730000019073486328125));
     float3 coat = (pigment * diffuse) + spec;
     if (blue)
@@ -3400,8 +3404,8 @@ float3 kitPaintFinish(thread const float3& p, thread const float3& n, thread con
         float3 cells = p * 68.0;
         float3 delta = fract(cells) - float3(0.5);
         float3 param_21 = floor(cells);
-        float _8670 = kitPaintHash(param_21);
-        float seed = _8670;
+        float _8706 = kitPaintHash(param_21);
+        float seed = _8706;
         float flake = (1.0 - smoothstep(0.119999997317790985107421875, 0.4900000095367431640625, length(delta))) * smoothstep(0.4600000083446502685546875, 0.920000016689300537109375, seed);
         float lod = fast::clamp((U.viewport.y - 140.0) / 540.0, 0.02500000037252902984619140625, 0.920000016689300537109375) * (0.300000011920928955078125 + (0.699999988079071044921875 * facing));
         float blueSheen = ((0.36000001430511474609375 * environment.z) + (0.23999999463558197021484375 * (first + side))) + (0.430000007152557373046875 * rail);
@@ -4015,19 +4019,19 @@ float3 liftLampOrigin(thread const float& side, thread float& kitLift)
 static inline __attribute__((always_inline))
 float3 studyLampOrigin(thread const float& style, thread const float& side, thread float& kitLift)
 {
-    float3 _10794;
+    float3 _10830;
     if (style >= 3.5)
     {
         float param = side;
-        _10794 = liftLampOrigin(param, kitLift);
+        _10830 = liftLampOrigin(param, kitLift);
     }
     else
     {
         float param_1 = style;
         float param_2 = side;
-        _10794 = headOrigin(param_1, param_2);
+        _10830 = headOrigin(param_1, param_2);
     }
-    return _10794;
+    return _10830;
 }
 
 static inline __attribute__((always_inline))
@@ -4071,8 +4075,8 @@ float3 headBounce(thread const float3& p, thread const float3& n, thread const f
         transport += (((0.0240000002086162567138671875 * fast::max(0.0, dot(n, toFloor))) * rsqrt(f2)) / (1.0 + f2));
     }
     float param_2 = style;
-    float3 _11155 = headTint(param_2);
-    return (_11155 * transport) * power;
+    float3 _11191 = headTint(param_2);
+    return (_11191 * transport) * power;
 }
 
 static inline __attribute__((always_inline))
@@ -4090,7 +4094,7 @@ float3 studyGlare(thread const float3& eye, thread const float3& ray, thread con
     {
         return glow;
     }
-    float3 _11366;
+    float3 _11402;
     for (int i = 0; i < 2; i++)
     {
         float side = (float(i) * 2.0) - 1.0;
@@ -4104,35 +4108,35 @@ float3 studyGlare(thread const float3& eye, thread const float3& ray, thread con
         }
         float3 d = light - eye;
         float along = dot(d, ray);
-        bool _11347 = along <= 0.0;
-        bool _11355;
-        if (!_11347)
+        bool _11383 = along <= 0.0;
+        bool _11391;
+        if (!_11383)
         {
-            _11355 = along > (depth + 0.115000002086162567138671875);
+            _11391 = along > (depth + 0.115000002086162567138671875);
         }
         else
         {
-            _11355 = _11347;
+            _11391 = _11383;
         }
-        if (_11355)
+        if (_11391)
         {
             continue;
         }
         if (style >= 3.5)
         {
-            _11366 = liftLampAxis(kitLift);
+            _11402 = liftLampAxis(kitLift);
         }
         else
         {
-            _11366 = fast::normalize(float3(0.039999999105930328369140625 * side, -0.12999999523162841796875, 1.0));
+            _11402 = fast::normalize(float3(0.039999999105930328369140625 * side, -0.12999999523162841796875, 1.0));
         }
-        float facing = smoothstep(0.0199999995529651641845703125, 0.920000016689300537109375, dot(fast::normalize(eye - light), _11366));
+        float facing = smoothstep(0.0199999995529651641845703125, 0.920000016689300537109375, dot(fast::normalize(eye - light), _11402));
         float3 sep = d - (ray * along);
         float r2 = dot(sep, sep);
         float radius = (((style > 1.5) && (style < 2.5)) || (style >= 3.5)) ? 0.061999998986721038818359375 : 0.104999996721744537353515625;
         float param_2 = style;
-        float3 _11401 = headTint(param_2);
-        glow += (((_11401 * ((0.061999998986721038818359375 * exp(((-2.0) * r2) / (radius * radius))) + (0.0089999996125698089599609375 * exp((-20.0) * r2)))) * power) * facing);
+        float3 _11437 = headTint(param_2);
+        glow += (((_11437 * ((0.061999998986721038818359375 * exp(((-2.0) * r2) / (radius * radius))) + (0.0089999996125698089599609375 * exp((-20.0) * r2)))) * power) * facing);
     }
     return glow;
 }
@@ -4140,26 +4144,26 @@ float3 studyGlare(thread const float3& eye, thread const float3& ray, thread con
 static inline __attribute__((always_inline))
 float nativeShadow(thread const float2& uv, thread const float& style, thread bool& scKitOn, thread float& scKitRoll, thread float2& scKitYawCS, thread float& kitLift, constant NativeUniforms& U)
 {
-    bool _11430 = U.mechanics.y < 0.5;
-    bool _11437;
-    if (!_11430)
+    bool _11466 = U.mechanics.y < 0.5;
+    bool _11473;
+    if (!_11466)
     {
-        _11437 = length(uv) > 3.599999904632568359375;
+        _11473 = length(uv) > 3.599999904632568359375;
     }
     else
     {
-        _11437 = _11430;
+        _11473 = _11466;
     }
-    if (_11437)
+    if (_11473)
     {
         return 0.0;
     }
     float3 param = float3(uv.x, -0.767000019550323486328125, uv.y);
-    float3 _11448 = scoutPoint(param, U);
-    float3 p = _11448;
+    float3 _11484 = scoutPoint(param, U);
+    float3 p = _11484;
     float3 param_1 = float3(-0.5099999904632568359375, 0.89999997615814208984375, 0.680000007152557373046875);
-    float3 _11451 = worldToScout(param_1, U);
-    float3 light = fast::normalize(_11451);
+    float3 _11487 = worldToScout(param_1, U);
+    float3 light = fast::normalize(_11487);
     float t = 0.02199999988079071044921875;
     float visibility = 1.0;
     for (int i = 0; i < 32; i++)
@@ -4201,16 +4205,16 @@ float sfLobe(thread const float2& angle, thread const float2& width)
 static inline __attribute__((always_inline))
 float sfCandela(thread const float3& ray, thread const float& style, thread const float& side)
 {
-    float _10843;
+    float _10879;
     if (style < 1.5)
     {
-        _10843 = 0.20499999821186065673828125;
+        _10879 = 0.20499999821186065673828125;
     }
     else
     {
-        _10843 = (style < 2.5) ? 0.4799999892711639404296875 : 0.20000000298023223876953125;
+        _10879 = (style < 2.5) ? 0.4799999892711639404296875 : 0.20000000298023223876953125;
     }
-    float skirtGain = _10843;
+    float skirtGain = _10879;
     float down = fast::max(-ray.y, 0.0);
     float skirt = (((skirtGain * down) * down) * down) * smoothstep(-0.2800000011920928955078125, 0.4199999868869781494140625, ray.z);
     if (ray.z <= 0.008000000379979610443115234375)
@@ -4290,16 +4294,16 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
     float param_1 = U.pose.z;
     float param_2 = U.options.x;
     scKitPose(param, param_1, param_2, scKitOn, scKitRoll, scKitYawCS, U);
-    float _11555;
+    float _11591;
     if (kit)
     {
-        _11555 = liftLampGain(kitLift);
+        _11591 = liftLampGain(kitLift);
     }
     else
     {
-        _11555 = 1.0;
+        _11591 = 1.0;
     }
-    float power = U.outfit.w * _11555;
+    float power = U.outfit.w * _11591;
     if (style < 0.5)
     {
         power = 0.0;
@@ -4346,17 +4350,17 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
         float param_10 = style;
         float3 n = studyNormal(param_9, param_10, scKitOn, scKitRoll, scKitYawCS, kitLift);
         float3 v = -rd;
-        bool _11684 = hit.y == 3.0;
-        bool _11690;
-        if (_11684)
+        bool _11720 = hit.y == 3.0;
+        bool _11726;
+        if (_11720)
         {
-            _11690 = n.z > 0.939999997615814208984375;
+            _11726 = n.z > 0.939999997615814208984375;
         }
         else
         {
-            _11690 = _11684;
+            _11726 = _11720;
         }
-        if (_11690)
+        if (_11726)
         {
             float param_11 = U.pose.z;
             float3 param_12 = p + (v * ((0.515999972820281982421875 - p.z) / v.z));
@@ -4423,12 +4427,12 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
                         float3 param_47 = n;
                         float3 param_48 = v;
                         float param_49 = hit.y;
-                        float3 _11816 = scHousing(param_46, param_47, param_48, param_49, scKitOn, scKitRoll, scKitYawCS, scoutRoofHit, U);
+                        float3 _11852 = scHousing(param_46, param_47, param_48, param_49, scKitOn, scKitRoll, scKitYawCS, scoutRoofHit, U);
                         float3 param_50 = p;
                         float3 param_51 = n;
                         float3 param_52 = v;
                         float param_53 = hit.y;
-                        float3 param_54 = _11816;
+                        float3 param_54 = _11852;
                         float param_55 = U.outfit.y;
                         float3 param_56 = p;
                         float3 param_57 = n;
@@ -4450,31 +4454,31 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
     float s = sin(U.pose.x);
     float2 floorPoint = float2((c * uv.x) - (s * uv.y), (s * uv.x) + (c * uv.y));
     float detail = fast::clamp(U.viewport.z / 55.0, 0.100000001490116119384765625, 1.0);
-    float _11892;
+    float _11928;
     if (U.receiver.w > 0.0)
     {
         float2 param_65 = uv;
         float param_66 = style;
-        _11892 = nativeShadow(param_65, param_66, scKitOn, scKitRoll, scKitYawCS, kitLift, U);
+        _11928 = nativeShadow(param_65, param_66, scKitOn, scKitRoll, scKitYawCS, kitLift, U);
     }
     else
     {
-        _11892 = 0.0;
+        _11928 = 0.0;
     }
-    float shade = _11892;
+    float shade = _11928;
     float dust = 0.0;
     float floorAlpha = shade + ((1.0 - shade) * dust);
     float3 floorRGB = (float3(0.0030000000260770320892333984375, 0.004999999888241291046142578125, 0.008000000379979610443115234375) * shade) + ((float3(0.11900000274181365966796875, 0.112999998033046722412109375, 0.09399999678134918212890625) * dust) * (1.0 - shade));
     float3 param_67 = float3(uv.x, -0.767000019550323486328125, uv.y);
-    float3 _11928 = scoutPoint(param_67, U);
-    float3 floorLocal = _11928;
+    float3 _11964 = scoutPoint(param_67, U);
+    float3 floorLocal = _11964;
     float3 param_68 = float3(0.0, 1.0, 0.0);
-    float3 _11931 = worldToScout(param_68, U);
-    float3 floorNormal = _11931;
+    float3 _11967 = worldToScout(param_68, U);
+    float3 floorNormal = _11967;
     float3 light = float3(0.0);
     if ((U.receiver.w > 0.0) && (power > 0.0))
     {
-        float3 _11973;
+        float3 _12009;
         for (int k = 0; k < 2; k++)
         {
             float side = (k == 0) ? (-1.0) : 1.0;
@@ -4486,20 +4490,20 @@ fragment main0_out main0(constant NativeUniforms& U [[buffer(0)]], float4 gl_Fra
             if (kit)
             {
                 float3 param_71 = ray;
-                _11973 = liftLampReferenceDirection(param_71, kitLift);
+                _12009 = liftLampReferenceDirection(param_71, kitLift);
             }
             else
             {
-                _11973 = ray;
+                _12009 = ray;
             }
-            float3 opticRay = _11973;
+            float3 opticRay = _12009;
             float3 param_72 = opticRay;
             float param_73 = kit ? 2.0 : style;
             float param_74 = side;
             float e = (sfCandela(param_72, param_73, param_74) * fast::max(dot(-ray, floorNormal), 0.0)) / (d2 + 0.054999999701976776123046875);
             float param_75 = style;
-            float3 _12007 = headTint(param_75);
-            light += (((float3(0.24500000476837158203125, 0.25, 0.2579999864101409912109375) * e) * _12007) * power);
+            float3 _12043 = headTint(param_75);
+            light += (((float3(0.24500000476837158203125, 0.25, 0.2579999864101409912109375) * e) * _12043) * power);
         }
     }
     float lightPeak = fast::max(light.x, fast::max(light.y, light.z));

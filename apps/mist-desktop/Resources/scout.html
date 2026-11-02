@@ -2984,6 +2984,8 @@ fc.addEventListener('pointerdown', e => { scoutDragDistance=0; nativeDrag = {x:e
 fc.addEventListener('pointermove', e => { if(nativeDrag) { scoutDragDistance+=Math.hypot(e.screenX-nativeDrag.x,e.screenY-nativeDrag.y); nativePost('drag',{dx:e.screenX-nativeDrag.x,dy:e.screenY-nativeDrag.y}); nativeDrag={x:e.screenX,y:e.screenY}; }});
 fc.addEventListener('pointerup', () => { const clicked=nativeDrag&&scoutDragDistance<5;nativeDrag=null; nativePost('dragEnd');if(clicked)nativePost('scoutSummon'); });
 fc.addEventListener('pointercancel', () => { nativeDrag=null; nativePost('dragEnd'); });
+// Accessibility/keyboard activation has no pointerup; physical clicks already dispatch there.
+fc.addEventListener('click', e => { if(e.detail===0)nativePost('scoutSummon'); });
 nativePost('ready');
 
 window.nativeScout=!!window.ROVE_NATIVE_SCOUT;window.roveNativeScout=(active)=>{window.nativeScout=active;scoutCanvas.style.display=ground.style.display=lamps.style.display=active?'none':'';if(active)scoutGPU?.gl.getExtension('WEBGL_lose_context')?.loseContext();};

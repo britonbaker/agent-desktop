@@ -427,6 +427,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     @objc private func knockDiagnostics() {
         let age=lastMotionSample>0 ? String(format:"%.1f",ProcessInfo.processInfo.systemUptime-lastMotionSample) : "no"
+        let diagnosticURL=URL.applicationSupportDirectory.appendingPathComponent("Rove/motion-diagnostics.json")
+        try? motion.exportDiagnostics(to:diagnosticURL)
         let alert=NSAlert();alert.messageText="Rove knock diagnostics"
         alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks); dismiss triples: \(dismissedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nAccessibility trusted: \(AXIsProcessTrusted())\nShift events: \(shiftEvents); accepted gestures: \(shiftActivations)\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
         alert.addButton(withTitle:"Done");alert.runModal()
@@ -554,7 +556,13 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if isWandering {parkRover()}
         case "toggle": toggle()
         case "scoutSummon":
-            let wasListening=state == "listening";toggle();scout?.faceRequested = !wasListening
+            if scout?.faceRequested==true && conversationActive {
+                if state=="speaking" || state=="thinking" {beginConversation();scout?.faceRequested=true}
+                scout?.nudgeBalance()
+            } else {
+                let wasListening=state == "listening";toggle();scout?.faceRequested = !wasListening
+                scout?.nudgeBalance()
+            }
         case "stop": stop()
         case "text": if let text = body["text"] as? String { respond(String(text.prefix(2000))) }
         case "speak": break

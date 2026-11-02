@@ -12,6 +12,28 @@ final class MotionSensor {
     private var keyboardCheck = 0.0
     private var keyboardAge = Double.infinity
     private(set) var samples = 0
+    private struct Sample {var time=0.0,strength=0.0,keyboardAge=0.0}
+    // Three minutes at 100 Hz, capped below half a megabyte. No key codes or text.
+    private var recent=[Sample](repeating:Sample(),count:18000)
+    private var recentCount=0,recentNext=0
+    func exportDiagnostics(to url:URL) throws {
+        let start=recentCount==recent.count ? recentNext : 0
+        let rows=(0..<recentCount).map {recent[(start+$0)%recent.count]}
+        let epoch=rows.first?.time ?? 0
+        let data=try JSONSerialization.data(withJSONObject:rows.map {[$0.time-epoch,$0.strength,$0.keyboardAge]})
+        try data.write(to:url,options:.atomic)
+        try FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:url.path)
+    }
+    private func record(time:Double,strength:Double,keyboardAge:Double) {
+        guard time.isFinite,strength.isFinite,keyboardAge.isFinite else {return}
+        let previous=(recentNext+recent.count-1)%recent.count
+        if recentCount>0,time-recent[previous].time<0.01 {
+            if strength>recent[previous].strength {recent[previous].strength=strength;recent[previous].keyboardAge=keyboardAge}
+        } else {
+            recent[recentNext]=Sample(time:time,strength:strength,keyboardAge:keyboardAge)
+            recentNext=(recentNext+1)%recent.count;recentCount=min(recent.count,recentCount+1)
+        }
+    }
     func start() throws {
         stop()
         var iterator: io_iterator_t = 0
@@ -43,20 +65,20 @@ final class MotionSensor {
                 guard let context, result == kIOReturnSuccess, length == 22 else { return }
                 Unmanaged<MotionSensor>.fromOpaque(context).takeUnretainedValue().receive(bytes, length)
             }, Unmanaged.passUnretained(self).toOpaque())
-            IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue)
+            IOHIDDeviceScheduleWithRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue)
         }
         IOObjectRelease(iterator)
         guard !devices.isEmpty else { stop(); throw NSError(domain: "RoveMotion", code: 1, userInfo: [NSLocalizedDescriptionKey: "Motion sensor unavailable. Use the character’s Talk button."]) }
     }
     func stop() {
-        for device in devices { IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.defaultMode.rawValue); IOHIDDeviceClose(device, 0) }
+        for device in devices { IOHIDDeviceUnscheduleFromRunLoop(device, CFRunLoopGetMain(), CFRunLoopMode.commonModes.rawValue); IOHIDDeviceClose(device, 0) }
         devices.removeAll()
         buffers.forEach { $0.deallocate() }; buffers.removeAll()
         for (driver, saved) in changed {
             for (key, value) in saved.reversed() { IORegistryEntrySetCFProperty(driver, key as CFString, value) }
             IOObjectRelease(driver)
         }
-        changed.removeAll(); previous.removeAll(); samples = 0
+        changed.removeAll(); previous.removeAll(); samples = 0;recentCount=0;recentNext=0
     }
     private func number(_ service: io_service_t, _ key: String) -> Int? {
         (IORegistryEntryCreateCFProperty(service, key as CFString, kCFAllocatorDefault, 0)?.takeRetainedValue() as? NSNumber)?.intValue
@@ -73,6 +95,8 @@ final class MotionSensor {
             keyboardAge = min(CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown), CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .flagsChanged))
             keyboardCheck = now
         }
-        onSample?(now, strength, keyboardAge + now - keyboardCheck)
+        let age=keyboardAge+now-keyboardCheck
+        record(time:now,strength:strength,keyboardAge:age)
+        onSample?(now,strength,age)
     }
 }

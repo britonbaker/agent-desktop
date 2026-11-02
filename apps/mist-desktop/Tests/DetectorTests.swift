@@ -35,6 +35,8 @@ import Foundation
         precondition(gestures([1,1.3,1.6,1.9]).isEmpty,"Extra impacts are not a gesture")
         precondition(gestures([1,1.3,1.6],keys:[1.8]).isEmpty,"Typing cancels a pending dismiss")
         precondition(gestures([1,1.1,1.2]).isEmpty,"Ringing is not a dismiss gesture")
+        precondition(gestures([1,1.03,1.07,1.3,1.33,1.37]) == [.double],"Real impacts with threshold ringing still form a pair")
+        precondition(gestures([1,1.03,1.07,1.3,1.33,1.37,1.6,1.63,1.67]) == [.triple],"Ringing must not consume triple dismissal")
         print("PASS double/triple taps: pair activation, exclusive triple dismissal, ringing, extra impacts and keyboard suppression")
     }
 }

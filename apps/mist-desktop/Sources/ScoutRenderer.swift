@@ -30,7 +30,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     private var renderedWheelie:Float=0
     private var wheelieVelocity:Float=0
     private var lift: Float = 0
-    private var liftVelocity: Float = 0
+    private var balance=ScoutBalance()
+    func nudgeBalance() {balance.tap()}
     private var previous = Date()
     private var entered = Date()
     private let started = Date()
@@ -91,11 +92,11 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let showRoofFace = !frontPresented && (roofFace || ["listening","thinking","speaking"].contains(state))
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
-                heading,distance,["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
-                Float(Date().timeIntervalSince(entered)),headroom,wall.contact ? 0 : renderedWheelie,0,
+                heading,distance+Float(balance.travel)*Float(camera.pointsPerUnit),["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
+                Float(Date().timeIntervalSince(entered)),headroom,wall.contact ? 0 : renderedWheelie,Float(balance.pitchCorrection),
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
                 lampLift,shadow ? 1 : 0,tracks ? 1 : 0,showRoofFace ? 1 : 0,
-                Float(wall.pitch),Float(wall.roll),Float(wall.height),0,
+                Float(wall.pitch),Float(wall.roll),Float(wall.height),Float(balance.travel),
                 150,200,0,0]
     }
     func draw(in view: MTKView) {
@@ -108,11 +109,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             renderedWheelie=max(0,min(0.85,renderedWheelie+wheelieVelocity*dt))
         }
         let target: Float = faceRequested && !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
-        if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion { lift=target;liftVelocity=0 }
-        else {
-            liftVelocity += ((target-lift)*64-liftVelocity*16)*dt
-            lift += liftVelocity*dt;lift=max(0,min(1,lift))
-        }
+        balance.step(Double(dt),engaged:target>0.5,reducedMotion:NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
+        lift=Float(balance.presentation)
         view.preferredFramesPerSecond = moving || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
         if let window=view.window {
             if shadow || lamps {
@@ -164,14 +162,20 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     }
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
-        var wheelFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0),("lighting-north",0,0),("lighting-east",0,0),("lighting-south",0,0),("lighting-west",0,0)] {
+        var wheelFrames:[Data]=[],balanceFrames:[Data]=[]
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("balance-settled",0,0),("balance-tapped",0,0),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0),("lighting-north",0,0),("lighting-east",0,0),("lighting-south",0,0),("lighting-west",0,0)] {
             let lighting=name.hasPrefix("lighting-"),w=lighting ? 1000 : 600,h=lighting ? 1000 : 760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
             if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
+            if name.hasPrefix("balance-") {
+                var motion=ScoutBalance()
+                for _ in 0..<360 {motion.step(1/120,engaged:true)}
+                if name=="balance-tapped" {motion.tap();for _ in 0..<12 {motion.step(1/120,engaged:true)}}
+                values[11]=Float(motion.presentation);values[15]=Float(motion.pitchCorrection);values[27]=Float(motion.travel);values[9]+=Float(motion.travel)*values[2]
+            }
             if name.hasPrefix("roof-face") {values[23]=1;values[10]=name=="roof-face-speaking" ? 3 : 1}
             if name.hasPrefix("wall-") {
                 let corner=name=="wall-corner",angle=corner ? -0.4 : -0.6
@@ -198,10 +202,14 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             guard let png=bitmap.representation(using:.png,properties:[:]) else {throw NSError(domain:"ScoutPreview",code:3)}
             try png.write(to:URL(fileURLWithPath:directory).appendingPathComponent(name+".png"))
             if name.hasPrefix("drive-") {wheelFrames.append(Data(bytes:output,count:w*h*4))}
+            if name.hasPrefix("balance-") {balanceFrames.append(Data(bytes:output,count:w*h*4))}
         }
         let changed=zip(wheelFrames[0],wheelFrames[1]).filter {abs(Int($0.0)-Int($0.1))>8}.count
         guard changed>100 else {throw NSError(domain:"ScoutPreview",code:4,userInfo:[NSLocalizedDescriptionKey:"Wheel travel did not change the render"])}
         print("PASS authored wheel rotation:",changed,"channels changed from travel alone")
+        let correction=zip(balanceFrames[0],balanceFrames[1]).filter {abs(Int($0.0)-Int($0.1))>8}.count
+        guard correction>100 else {throw NSError(domain:"ScoutBalance",code:1,userInfo:[NSLocalizedDescriptionKey:"Balance impulse did not affect rendered body and wheels"])}
+        print("PASS rear-axle balancing impulse:",correction,"rendered channels changed")
         for style in 0...7 {
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:300,height:380,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
