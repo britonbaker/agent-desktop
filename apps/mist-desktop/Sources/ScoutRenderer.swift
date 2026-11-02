@@ -94,7 +94,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let camera=ScoutCamera(millimetersPerPoint:mmPerPoint,screenSize:frame.size,roverCenter:center,viewingDistance:viewingDistance,hingeDelta:number.map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } == true ? hingeDelta : 0)
         let eye=camera.eye
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
-        let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : ScoutWall.pose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(camera.pointsPerUnit),area:frame)
+        let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : ScoutWall.pose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(camera.pointsPerUnit),area:screen.map {ScoutArena.shared.area(for:$0)} ?? frame,settings:screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
         let frontPresented=lift>0.08 || renderedWheelie>0.12 || wall.pitch>0.12
         let showRoofFace = !frontPresented && (roofFace || ["listening","thinking","speaking"].contains(state))
         let terrainUniforms=terrain.uniforms(center:CGPoint(x:origin.x+150,y:origin.y+200),scale:Double(camera.pointsPerUnit))
@@ -147,7 +147,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
                 let scale=Double(uniforms(width:600,height:760)[2])
-                let wall=ScoutWall.pose(center:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,area:window.screen?.frame ?? .zero)
+                let wall=ScoutWall.pose(center:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,area:window.screen.map {ScoutArena.shared.area(for:$0)} ?? .zero,settings:window.screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
                 trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05 && abs(wall.pitch+terrainPitch)<0.05,grounded:lift<0.05 && abs(wall.roll+terrainRoll)<0.05,window:window,belowWindow:(shadow || lamps) ? groundOverlay?.windowNumber : nil)
             } else {trackOverlay?.clear()}
         }
