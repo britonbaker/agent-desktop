@@ -83,9 +83,14 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     }
     func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {}
 
+    private func wallPose(center:CGPoint,heading:Double,scale:Double,screen:NSScreen?)->ScoutWall.Pose {
+        if calibrationActive,let screen {return ScoutWall.pose(center:center,heading:heading,scale:scale,area:ScoutArena.shared.area(for:screen),settings:ScoutArena.shared.settings(for:screen))}
+        return ScoutArena.shared.desktop().pose(center:center,heading:heading,scale:scale)
+    }
     func uniforms(width:Int,height:Int) -> [Float] {
         let contactClimb=max(calibrationClimb,greetingClimb)
-        let screen=view.window?.screen ?? NSScreen.main
+        let anchor=desktopPosition ?? view.window?.frame.origin ?? .zero
+        let screen=ScoutArena.shared.screen(at:CGPoint(x:anchor.x+150,y:anchor.y+200),fallback:view.window?.screen)
         let frame=screen?.frame ?? CGRect(x:0,y:0,width:1512,height:982)
         let number=screen?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         let physical=number.map { CGDisplayScreenSize(CGDirectDisplayID($0.uint32Value)) } ?? .zero
@@ -100,21 +105,23 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             if let base=baselineAngle,let angle=lid?.read() {hingeDelta=(angle-base)*Double.pi/180}
         }
         let camera=ScoutCamera(millimetersPerPoint:mmPerPoint,screenSize:frame.size,roverCenter:center,viewingDistance:viewingDistance,hingeDelta:number.map { CGDisplayIsBuiltin(CGDirectDisplayID($0.uint32Value)) != 0 } == true ? hingeDelta : 0)
-        let eye=camera.eye
+        let presentation=ScoutArena.shared.camera(at:CGPoint(x:origin.x+150,y:origin.y+200),viewingDistance:viewingDistance,hingeDelta:hingeDelta)
+        let pointsPerUnit=presentation?.scale ?? camera.pointsPerUnit
+        let eye=presentation?.eye ?? camera.eye
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
-        let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : ScoutWall.pose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(camera.pointsPerUnit),area:screen.map {ScoutArena.shared.area(for:$0)} ?? frame,settings:screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
+        let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : wallPose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(pointsPerUnit),screen:screen)
         let climbTravel=0.862*(1-cos(Double(contactClimb)))
         let rearSupport:Double
         if contactClimb>0 {
-            let point=CGPoint(x:origin.x+150+sin(Double(heading))*climbTravel*Double(camera.pointsPerUnit),y:origin.y+200+cos(Double(heading))*climbTravel*Double(camera.pointsPerUnit))
-            rearSupport=ScoutWall.pose(center:point,heading:Double(heading),scale:Double(camera.pointsPerUnit),area:screen.map {ScoutArena.shared.area(for:$0)} ?? frame,settings:screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings()).rearHeight
+            let point=CGPoint(x:origin.x+150+sin(Double(heading))*climbTravel*Double(pointsPerUnit),y:origin.y+200+cos(Double(heading))*climbTravel*Double(pointsPerUnit))
+            rearSupport=wallPose(center:point,heading:Double(heading),scale:Double(pointsPerUnit),screen:screen).rearHeight
         } else {rearSupport=wall.height}
         let frontPresented=lift>0.08 || renderedWheelie>0.12 || wall.pitch>0.12 || contactClimb>0.12
         let showRoofFace = !frontPresented && (roofFace || ["listening","thinking","speaking"].contains(state))
-        let terrainUniforms=terrain.uniforms(center:CGPoint(x:origin.x+150,y:origin.y+200),scale:Double(camera.pointsPerUnit))
-        return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
+        let terrainUniforms=terrain.uniforms(center:CGPoint(x:origin.x+150,y:origin.y+200),scale:Double(pointsPerUnit))
+        return [Float(width),Float(height),Float(pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
-                heading,distance+Float(balance.travel)*Float(camera.pointsPerUnit),["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
+                heading,distance+Float(balance.travel)*Float(pointsPerUnit),["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
                 Float(Date().timeIntervalSince(entered)),headroom,contactClimb>0 ? contactClimb : (wall.contact ? 0 : renderedWheelie),Float(balance.pitchCorrection),
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
                 lampLift,shadow ? 1 : 0,tracks ? 1 : 0,showRoofFace ? 1 : 0,
@@ -141,7 +148,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             let scale=Double(uniforms(width:600,height:760)[2])
             if !windowSteps || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {terrain=ScoutWindowSteps();terrainPose=ScoutWindowSteps.Pose();terrainPitch=0;terrainRoll=0;pitchSpeed=0;rollSpeed=0}
             else {
-                terrain=desktopSurfaces.sample(display:window.screen?.frame ?? .zero,now:ProcessInfo.processInfo.systemUptime)
+                terrain=desktopSurfaces.sample(display:ScoutArena.shared.desktop().bounds,now:ProcessInfo.processInfo.systemUptime)
                 terrainPose=terrain.pose(center:center,heading:Double(heading),scale:scale)
                 if lift>0.001 {
                     let h=Double(heading),presented=h+atan2(sin(Double.pi-h),cos(Double.pi-h))*Double(lift)
@@ -163,7 +170,7 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
                 let scale=Double(uniforms(width:600,height:760)[2])
-                let wall=ScoutWall.pose(center:CGPoint(x:position.x+150,y:position.y+200),heading:Double(heading),scale:scale,area:window.screen.map {ScoutArena.shared.area(for:$0)} ?? .zero,settings:window.screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
+                let wall=wallPose(center:CGPoint(x:position.x+150,y:position.y+200),heading:Double(heading),scale:scale,screen:window.screen)
                 trackOverlay?.update(position:CGPoint(x:position.x+150,y:position.y+200),heading:Double(heading),scale:scale,frontContact:lift<0.05 && greetingClimb<0.05 && calibrationClimb<0.05 && renderedWheelie<0.05 && abs(wall.pitch+terrainPitch)<0.05,grounded:abs(wall.roll+terrainRoll)<0.05,window:window,belowWindow:(shadow || lamps) ? groundOverlay?.windowNumber : nil)
             } else {trackOverlay?.clear()}
         }

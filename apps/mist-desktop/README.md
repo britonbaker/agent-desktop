@@ -63,7 +63,7 @@ Idle face animation is capped around 20 frames per second, active animation arou
 
 ## Scout driving prototype
 
-Scout rests flat in a top-down survey view. Position and hinge angle add subtle parallax, capped at seven degrees from overhead. Display dimensions set physical scale: one model unit is 11 mm, about 40 percent smaller than the earlier version. Moving him across the screen changes perspective without stretching his geometry. Guide him by dragging; the native drive controller steers and brakes toward the destination instead of applying the floating companion's release momentum. The menu offers **Drive Scout in a small loop**, **Let Scout wander** and **Park Scout**. Stop, listening, switching companions, and quitting cancel the route. Movement stays inside the current screen's visible frame.
+Scout rests flat in a top-down survey view. Position and hinge angle add subtle parallax, capped at seven degrees from overhead. Display dimensions set physical scale: one model unit is 11 mm, about 40 percent smaller than the earlier version. Moving him across the screen changes perspective without stretching his geometry. Guide him by dragging; the native drive controller steers and brakes toward the destination instead of applying the floating companion's release momentum. The menu offers **Drive Scout in a small loop**, **Let Scout wander** and **Park Scout**. Stop, listening, switching companions, and quitting cancel the route. Movement stays within the connected desktop's outer boundary.
 
 Wheel tread and hub rotation follow traveled distance and tire radius. Two emissive lamps attach to the upper front edge of the chassis. Ground-plane cones, body shadow and wheel-contact shadows use the same projection. This is a visual lighting approximation; it does not change other apps' pixels. Clicking Scout turns him toward you and raises the front around the rear axle. A bounded damped controller adds settling overshoot and small rear-wheel corrections. Tapping him again while listening adds an impulse; while thinking or speaking, it also interrupts and returns to listening. The rear axle stays at its ground contact height as the wheels correct, and the existing geometry casts the resulting shadow. Talk, the explanation command and double-tapping keep the survey view and roof readout visible. Stop returns him to the display. Reduced Motion snaps between these poses.
 
@@ -114,7 +114,7 @@ Live development checks brought Finder forward from a natural typed request and 
 
 ## Idle movement and compact controls
 
-Scout takes short idle drives around the spot where you placed him, with pauses between trips. Idle speed is limited to 20–30 points per second with slower acceleration than dragging. The existing steering, braking, tread rotation and contact shadows are reused. Destinations remain within the current display's visible frame. Dragging establishes a new home area.
+Scout takes idle drives across the connected desktop, pausing between trips. Every third trip attempts a visit to another reachable display; local drives use 40–65 points per second and display visits use 150, with gentler acceleration than dragging. The existing steering, braking, tread rotation and contact shadows are reused. Shared display edges are open only along their overlapping span. Exposed portions of offset edges and the outer perimeter remain curved walls. Gaps and openings narrower than his clearance do not connect displays.
 
 Wandering pauses while the pointer is near Scout or his controls, while the text input is open, during a conversation, while a modal dialog is open, and when Reduce Motion is enabled. **Park Scout** disables automatic wandering; **Let Scout wander** turns it back on. That preference persists. The existing rounded control is now positioned just below the smaller rover, with compact button sizing and a circular, inset close affordance inside the expanded text capsule.
 
@@ -210,7 +210,7 @@ The local layout reader samples window bounds and front-to-back order at most fo
 
 `ScoutWindowStepsTests.swift` checks overlap levels, ordered ascent/descent, diagonal contact, rear-axle support and continuous edge ramps. The native self-test compares CPU tire heights against the Metal shadow/light receiver and renders approach, deck, descent and corner previews. To try it live, overlap two app windows and guide Scout across the upper window's outer edge.
 
-Driving now uses a 320-point-per-second cruise cap and ramps acceleration through a bounded rate of torque change. The braking envelope reserves room for that torque transition and controller response before the destination. App-directed travel can reach 380 points per second; idle wandering keeps its 20–30-point-per-second cap with gentler acceleration and braking. Summoning uses a faster fifth-order approach curve with zero acceleration at its endpoints. `RoverDriveTests.swift` checks smooth launch, torque limits, gentle arrival, long-trip time and consistency across frame rates. These are simulated motion checks; live perceived speed still needs review.
+Driving now uses a 320-point-per-second cruise cap and ramps acceleration through a bounded rate of torque change. The braking envelope reserves room for that torque transition and controller response before the destination. App-directed travel can reach 380 points per second; idle wandering uses 40–65 points per second locally and 150 for display visits, with gentler acceleration and braking. Summoning uses a faster fifth-order approach curve with zero acceleration at its endpoints. `RoverDriveTests.swift` checks smooth launch, torque limits, gentle arrival, long-trip time and consistency across frame rates. These are simulated motion checks; live perceived speed still needs review.
 
 ## Live screen-edge tuning
 
@@ -232,3 +232,10 @@ Knock grouping can recognize a fresh, stronger impact during the previous knock'
 
 
 On a knock or double-Shift summon, Scout continues from the curved side bezel into a roughly 64-degree rear-axle climb, holds while conversing, and rolls back down when dismissed. The climb starts only after bezel contact. His roof switches back to its readout as he rises, leaving the front display as his only face. Manual edge-calibration settings remain unchanged.
+
+
+## Connected-display roaming
+
+**Visit other display** sends Scout along a route through the center of a shared opening. Automatic wandering uses the same route planner. The arena is the union of attached display rectangles, with saved insets applied at outer edges. The controller confines the full tire envelope to that union; it does not treat the enclosing bounding rectangle's empty corners as floor. Knocks still summon him to an exposed side wall. Display layout changes stop the current route and place him back within the current desktop. Conversation, dragging, pointer proximity, **Park Scout**, and Reduce Motion retain their existing pause behavior.
+
+Physical size and camera parallax blend across a 240-point band around a shared edge. Window-step surfaces and desktop-anchored lighting and tracks continue across the connected desktop. The edge-calibration inspector still isolates its selected display while open. `ScoutDesktopArenaTests.swift` checks offset and stacked layouts, footprint-safe routes, exposed walls, gaps, narrow openings and mirroring. `ScoutDesktopArenaPanelTests.swift` checks actual AppKit placement and continuous camera/scale through the attached displays' shared span.
