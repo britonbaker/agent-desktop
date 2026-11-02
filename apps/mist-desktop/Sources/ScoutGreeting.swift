@@ -14,8 +14,8 @@ struct ScoutGreeting {
     static func smooth(_ value:Double) -> Double {
         let t=min(1,max(0,value));return t*t*t*(t*(6*t-15)+10)
     }
-    static func destination(from origin:CGPoint,in area:CGRect,pointsPerUnit:Double) -> CGPoint {
-        let inset=ScoutWall.clearance(heading:.pi/2,scale:pointsPerUnit).width
+    static func destination(from origin:CGPoint,in area:CGRect,pointsPerUnit:Double,settings:ScoutWall.Settings=ScoutWall.Settings()) -> CGPoint {
+        let inset=ScoutWall.clearance(heading:.pi/2,scale:pointsPerUnit,settings:settings).width
         let center=origin.x+150
         let left=area.minX+inset-150,right=area.maxX-inset-150
         return CGPoint(x:center<area.midX ? left : right,y:origin.y)

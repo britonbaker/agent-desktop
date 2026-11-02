@@ -30,7 +30,7 @@ private final class ArenaCanvas:NSView {
         stroke(arena.insetBy(dx:width,dy:width),.systemCyan.withAlphaComponent(0.7),1,true)
         for fraction in [0.25,0.5,0.75] {stroke(arena.insetBy(dx:width*fraction,dy:width*fraction),.systemCyan.withAlphaComponent(0.22))}
         if let (center,heading)=rover {
-            let extent=ScoutWall.clearance(heading:heading,scale:scale)
+            let extent=ScoutWall.clearance(heading:heading,scale:scale,settings:settings)
             stroke(arena.insetBy(dx:extent.width,dy:extent.height),.systemYellow.withAlphaComponent(0.8),1,true)
             let c=cos(heading),s=sin(heading)
             for x in [-0.74,0.74] {for z in [-0.431,0.431] {
@@ -68,10 +68,13 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
     private var sliders:[String:NSSlider]=[:],values:[String:NSTextField]=[:]
     private let fullDisplay=NSButton(checkboxWithTitle:"Include the menu bar and Dock area",target:nil,action:nil)
     private let readout=NSTextField(labelWithString:"")
+    private var instructions:NSTextField?
+    private let pauseButton=NSButton(title:"Pause",target:nil,action:nil)
+    private var paused=false,right=false
     private var timer:Timer?
     private var scale=55.0
     var sample:(()->(center:CGPoint,heading:Double,scale:Double)?)?
-    var onChange:(()->Void)?,onPreview:((Bool)->Void)?,onClose:(()->Void)?
+    var onChange:(()->Void)?,onPreview:((Bool)->Void)?,onPause:((Bool)->Void)?,onClose:(()->Void)?
     init(screen:NSScreen) {
         displayID=ScoutArena.id(screen)
         inspector=NSPanel(contentRect:CGRect(x:0,y:0,width:400,height:650),styleMask:[.titled,.closable,.utilityWindow],backing:.buffered,defer:false)
@@ -79,6 +82,7 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         super.init()
         inspector.title="Rove — MacBook edge tuning";inspector.isReleasedWhenClosed=false
         inspector.level=NSWindow.Level(rawValue:NSWindow.Level.floating.rawValue+1);inspector.delegate=self
+        inspector.hidesOnDeactivate=false;inspector.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
         overlay.title="Rove edge debug overlay";overlay.isReleasedWhenClosed=false
         overlay.level = .floating;overlay.isOpaque=false;overlay.backgroundColor = .clear;overlay.hasShadow=false;overlay.ignoresMouseEvents=true
         overlay.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary];overlay.contentView=canvas
@@ -86,38 +90,43 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         func label(_ title:String,_ y:Double,_ size:Double=12)->NSTextField {
             let text=NSTextField(labelWithString:title);text.font=NSFont.systemFont(ofSize:size);text.frame=CGRect(x:20,y:y,width:360,height:36);text.lineBreakMode = .byWordWrapping;text.maximumNumberOfLines=2;root.addSubview(text);return text
         }
-        _=label("Cyan: curve · Yellow: center limit · Green: desktop\nOrange: raised tires · Window steps paused",600)
+        instructions=label("Continuous left-edge loop · sliders apply live\nCyan: curve · Yellow: center · Orange: tires",600)
         fullDisplay.frame=CGRect(x:20,y:565,width:365,height:26);fullDisplay.target=self;fullDisplay.action=#selector(changed(_:));root.addSubview(fullDisplay)
-        let rows:[(String,String,Double,Double)]=[("left","Left inset",0,180),("right","Right inset",0,180),("top","Top inset",0,180),("bottom","Bottom inset",0,180),("radius","Curve width",0.6,3.5),("rise","Curve rise",0.4,1.6)]
+        let rows:[(String,String,Double,Double)]=[("left","Left inset",0,180),("right","Right inset",0,180),("top","Top inset",0,180),("bottom","Bottom inset",0,180),("buffer","Extra wheel room",0.08,0.4),("radius","Curve width",0.6,3.5),("rise","Curve rise",0.4,1.6)]
         for (i,row) in rows.enumerated() {
-            let y=520-Double(i)*58
+            let y=520-Double(i)*50
             let name=NSTextField(labelWithString:row.1);name.frame=CGRect(x:20,y:y+10,width:150,height:20);root.addSubview(name)
             let value=NSTextField(labelWithString:"");value.alignment = .right;value.frame=CGRect(x:240,y:y+10,width:135,height:20);root.addSubview(value);values[row.0]=value
             let slider=NSSlider(value:0,minValue:row.2,maxValue:row.3,target:self,action:#selector(changed(_:)))
             slider.identifier=NSUserInterfaceItemIdentifier(row.0);slider.setAccessibilityLabel(row.1);slider.isContinuous=true;slider.frame=CGRect(x:20,y:y-12,width:355,height:24)
             root.addSubview(slider);sliders[row.0]=slider
         }
-        profile.frame=CGRect(x:20,y:103,width:360,height:104);root.addSubview(profile)
+        profile.frame=CGRect(x:20,y:103,width:360,height:94);root.addSubview(profile)
         readout.frame=CGRect(x:20,y:62,width:360,height:30);readout.font=NSFont.monospacedDigitSystemFont(ofSize:11,weight:.regular);readout.maximumNumberOfLines=2;root.addSubview(readout)
-        for (title,action,x) in [("Test left",#selector(testLeft),20.0),("Test right",#selector(testRight),143),("Reset",#selector(reset),266)] {
-            let button=NSButton(title:title,target:self,action:action);button.frame=CGRect(x:x,y:20,width:112,height:30);button.bezelStyle = .rounded;root.addSubview(button)
+        for (title,action,x) in [("Loop left",#selector(testLeft),20.0),("Loop right",#selector(testRight),112),("Reset",#selector(reset),296)] {
+            let button=NSButton(title:title,target:self,action:action);button.frame=CGRect(x:x,y:20,width:84,height:30);button.bezelStyle = .rounded;root.addSubview(button)
         }
+        pauseButton.target=self;pauseButton.action=#selector(toggleMotion);pauseButton.frame=CGRect(x:204,y:20,width:84,height:30);pauseButton.bezelStyle = .rounded;root.addSubview(pauseButton)
         let frame=screen.visibleFrame
         inspector.setFrameOrigin(CGPoint(x:frame.maxX-424,y:frame.maxY-700))
         syncControls()
     }
     private var screen:NSScreen? {NSScreen.screens.first {ScoutArena.id($0)==displayID}}
     func show() {
-        refresh();overlay.orderFrontRegardless();inspector.makeKeyAndOrderFront(nil)
+        refresh();overlay.orderFrontRegardless();focus()
         let clock=Timer(timeInterval:1/20,repeats:true) { [weak self] _ in self?.refresh() }
         timer=clock;RunLoop.main.add(clock,forMode:.common)
     }
     func close() {inspector.close()}
-    func focus() {inspector.makeKeyAndOrderFront(nil)}
+    func focus() {
+        if let screen {let f=screen.visibleFrame;inspector.setFrameOrigin(CGPoint(x:f.maxX-424,y:f.maxY-700))}
+        inspector.orderFrontRegardless();NSApp.activate(ignoringOtherApps:true);inspector.makeKeyAndOrderFront(nil)
+    }
+    func setMotionPaused(_ value:Bool) {paused=value;pauseButton.title=value ? "Resume" : "Pause";refresh()}
     private func syncControls() {
         guard let screen else {return}
         let s=ScoutArena.shared.settings(for:screen)
-        for (key,value) in [("left",s.left),("right",s.right),("top",s.top),("bottom",s.bottom),("radius",s.radius),("rise",s.rise)] {sliders[key]?.doubleValue=value}
+        for (key,value) in [("left",s.left),("right",s.right),("top",s.top),("bottom",s.bottom),("buffer",s.buffer),("radius",s.radius),("rise",s.rise)] {sliders[key]?.doubleValue=value}
         fullDisplay.state=s.fullDisplay ? .on : .off
         refresh()
     }
@@ -125,12 +134,13 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         guard let screen else {return}
         var s=ScoutWall.Settings()
         s.left=sliders["left"]!.doubleValue;s.right=sliders["right"]!.doubleValue;s.top=sliders["top"]!.doubleValue;s.bottom=sliders["bottom"]!.doubleValue
-        s.radius=sliders["radius"]!.doubleValue;s.rise=sliders["rise"]!.doubleValue;s.fullDisplay=fullDisplay.state == .on
+        s.buffer=sliders["buffer"]!.doubleValue;s.radius=sliders["radius"]!.doubleValue;s.rise=sliders["rise"]!.doubleValue;s.fullDisplay=fullDisplay.state == .on
         ScoutArena.shared.set(s,for:screen);onChange?();refresh()
     }
     @objc private func reset() {guard let screen else {return};ScoutArena.shared.set(ScoutWall.Settings(),for:screen);onChange?();syncControls()}
-    @objc private func testLeft() {onPreview?(false)}
-    @objc private func testRight() {onPreview?(true)}
+    @objc private func testLeft() {right=false;setMotionPaused(false);onPreview?(false)}
+    @objc private func testRight() {right=true;setMotionPaused(false);onPreview?(true)}
+    @objc private func toggleMotion() {setMotionPaused(!paused);onPause?(paused)}
     private func refresh() {
         guard let screen else {inspector.close();return}
         let s=ScoutArena.shared.settings(for:screen),rover=sample?()
@@ -140,6 +150,8 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         if overlay.frame != screen.frame {overlay.setFrame(screen.frame,display:false)}
         profile.settings=s;profile.scale=scale;profile.needsDisplay=true
         for key in ["left","right","top","bottom"] {values[key]?.stringValue="\(Int(sliders[key]?.doubleValue ?? 0)) pt"}
+        instructions?.stringValue="\(paused ? "Paused" : "Looping") \(right ? "right" : "left") edge · sliders apply live\nCyan: curve · Yellow: center · Orange: tires"
+        values["buffer"]?.stringValue="\(Int(s.buffer*scale)) pt"
         values["radius"]?.stringValue="\(Int(s.radius*scale)) pt";values["rise"]?.stringValue="\(Int(s.rise*100))%"
         if let rover {
             let p=ScoutWall.pose(center:rover.center,heading:rover.heading,scale:scale,area:canvas.arena,settings:s)
