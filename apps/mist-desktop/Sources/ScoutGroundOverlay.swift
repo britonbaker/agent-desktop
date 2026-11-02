@@ -1,6 +1,12 @@
 import AppKit
 import MetalKit
 
+/// Ground coordinates must remain aligned even when the large receiver extends
+/// past a display edge. AppKit's normal window constraint would shift its contents.
+private final class ScoutGroundPanel:NSPanel {
+    override func constrainFrameRect(_ frameRect:NSRect,to screen:NSScreen?)->NSRect {frameRect}
+}
+
 /// A separate EDR receiver: large enough for beams, never intercepting desktop input.
 final class ScoutGroundOverlay:NSObject,MTKViewDelegate {
     private let panel:NSPanel
@@ -10,9 +16,10 @@ final class ScoutGroundOverlay:NSObject,MTKViewDelegate {
     private var values:[Float]=[]
     private var ordered:Int?
     var windowNumber:Int {panel.windowNumber}
+    var receiverFrame:CGRect {panel.frame}
     init(device:MTLDevice,queue:MTLCommandQueue,encode:@escaping (MTLTexture,MTLCommandBuffer,[Float])->Void) {
         self.queue=queue;self.encode=encode
-        panel=NSPanel(contentRect:CGRect(x:0,y:0,width:1000,height:1000),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+        panel=ScoutGroundPanel(contentRect:CGRect(x:0,y:0,width:1000,height:1000),styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
         panel.title="Rove ground lighting";panel.isReleasedWhenClosed=false
         panel.level = .floating;panel.isOpaque=false;panel.backgroundColor = .clear;panel.hasShadow=false
         panel.ignoresMouseEvents=true;panel.collectionBehavior=[.canJoinAllSpaces,.fullScreenAuxiliary]
