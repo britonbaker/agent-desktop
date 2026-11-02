@@ -594,7 +594,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         scout?.roofFace=false
         greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
-        rover.maximumSpeed=125;rover.acceleration=230
+        rover.maximumSpeed=RoverDrive.cruiseSpeed;rover.acceleration=RoverDrive.cruiseAcceleration
+        rover.braking=RoverDrive.cruiseBraking;rover.jerk=RoverDrive.cruiseJerk
         driveTimer?.invalidate(); driveTimer = nil; driveRoute.removeAll(); rover.park()
         sendDrivePose()
     }
@@ -644,6 +645,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
         rover.position=panel.frame.origin;rover.target=destination
         rover.maximumSpeed=Double.random(in:20...30);rover.acceleration=45
+        rover.braking=70;rover.jerk=180
         isWandering=true;startDriveTimer()
     }
     @objc private func greetScout() {
@@ -696,7 +698,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let center=CGPoint(x:min(area.maxX-75,max(area.minX+75,anchor.x)),y:min(area.maxY-200,max(area.minY+200,anchor.y)))
         let destination=CGPoint(x:center.x-150,y:center.y-200)
         rover.position=panel.frame.origin;rover.target=destination
-        rover.maximumSpeed=210;rover.acceleration=260
+        rover.maximumSpeed=380;rover.acceleration=850;rover.braking=1100;rover.jerk=6500
         startDriveTimer()
     }
     private func bounded(_ point: CGPoint) -> CGPoint {

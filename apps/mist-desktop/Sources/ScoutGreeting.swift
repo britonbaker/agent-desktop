@@ -9,10 +9,10 @@ struct ScoutGreeting {
     var edgeHeading:Double?=nil
     var heading:Double {edgeHeading ?? (destination.x<origin.x ? -.pi/2 : .pi/2)}
     var travel:Double {hypot(destination.x-origin.x,destination.y-origin.y)}
-    var approach:Double {max(0.55,travel/480)}
+    var approach:Double {max(0.45,travel/580)}
     var duration:Double {0.3+approach+2.5}
     static func smooth(_ value:Double) -> Double {
-        let t=min(1,max(0,value));return t*t*(3-2*t)
+        let t=min(1,max(0,value));return t*t*t*(t*(6*t-15)+10)
     }
     static func destination(from origin:CGPoint,in area:CGRect,pointsPerUnit:Double) -> CGPoint {
         let inset=ScoutWall.clearance(heading:.pi/2,scale:pointsPerUnit).width
