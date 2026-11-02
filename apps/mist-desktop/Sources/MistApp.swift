@@ -293,7 +293,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             }
             studioMenu.addItem(group)
         }
-        for (title,kind) in [("Lights on","Lamps"),("Ground shadow","Shadow"),("Tire tracks","Tracks"),("Lightbar raised","LampLift")] {
+        for (title,kind) in [("Lights on","Lamps"),("Ground shadow","Shadow"),("Tire tracks","Tracks"),("Lightbar raised","LampLift"),("Climb window edges","WindowSteps")] {
             let item=NSMenuItem(title:title,action:#selector(chooseScoutFeature(_:)),keyEquivalent:"")
             item.target=self;item.representedObject=kind
             let value=UserDefaults.standard.object(forKey:"scout"+kind)
@@ -394,7 +394,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let enabled=item.state != .on;item.state=enabled ? .on : .off
             if kind=="LampLift" {UserDefaults.standard.set(Float(enabled ? 1 : 0),forKey:"scout"+kind);scout?.lampLift=enabled ? 1 : 0}
             else {UserDefaults.standard.set(enabled,forKey:"scout"+kind)}
-            if kind=="Lamps" {scout?.lamps=enabled};if kind=="Shadow" {scout?.shadow=enabled};if kind=="Tracks" {scout?.tracks=enabled}
+            if kind=="Lamps" {scout?.lamps=enabled};if kind=="Shadow" {scout?.shadow=enabled};if kind=="Tracks" {scout?.tracks=enabled};if kind=="WindowSteps" {scout?.windowSteps=enabled}
         }
     }
     @objc private func activateCompanion() {

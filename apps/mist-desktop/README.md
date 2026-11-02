@@ -201,3 +201,11 @@ The curved-wall collision boundary now contains the tires' full envelope with ca
 The motion sensor runs in the main run loop's common modes so menu interaction does not pause input. Threshold echoes within the impact refractory period extend that period rather than invalidating the entire gesture. The measured personal threshold remains unchanged; the live sensor diagnostics and a physical knock check are still needed to validate recognition.
 
 Knock diagnostics can export a rolling three-minute motion trace to Rove's private support directory. The in-memory buffer aggregates peak strength at 100 Hz and uses less than half a megabyte. It contains only relative time, impact strength and elapsed keyboard activity; it records no typed content or audio. The trace is written only when the diagnostics menu is opened, with user-only file permissions. A missed live test does not justify lowering the calibrated threshold.
+
+## Window steps
+
+Scout treats overlapping native windows as shallow physical layers. Each lip is half the authored tire diameter. Four tire samples control pitch, bank and height, with damped angular settling; front wheels climb or descend before the rear wheels. A clicked face-up pose uses the rear axle's support height. The native shadow and headlight receiver sample the same height field, including rounded window corners.
+
+The local layout reader samples window bounds and front-to-back order at most four times a second. It excludes Rove, nonstandard window levels, nearly transparent windows and small utility surfaces. It considers the first eight eligible windows on Scout's display, keeping their deck heights stable as he moves. It reads no window titles, accessibility text, screenshots or app contents. This is a visual contact approximation; individual suspension joints and real window occlusion are not simulated. Reduced Motion disables this effect. **Scout studio → Climb window edges** toggles it separately.
+
+`ScoutWindowStepsTests.swift` checks overlap levels, ordered ascent/descent, diagonal contact, rear-axle support and continuous edge ramps. The native self-test compares CPU tire heights against the Metal shadow/light receiver and renders approach, deck, descent and corner previews. To try it live, overlap two app windows and guide Scout across the upper window's outer edge.

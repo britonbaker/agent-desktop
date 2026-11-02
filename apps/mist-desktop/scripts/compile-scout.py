@@ -24,7 +24,20 @@ body=body.replace('vec2 q=vec2(-s.x,s.y);','''vec2 q=vec2(-s.x,s.y);
 body=body.replace('float kitInk(vec2 px,float style,float mode,float time) {','''float kitInk(vec2 px,float style,float mode,float time) {
     if(U.mechanics.w>.5)return scoutLcdInk(px,time,vec2(0.));''')
 body=body.replace('vec2 grid=style<5.5?vec2(25.,14.):style<6.5?vec2(64.,12.):vec2(19.,28.);','vec2 grid=U.mechanics.w>.5?vec2(64.,48.):style<5.5?vec2(25.,14.):style<6.5?vec2(64.,12.):vec2(19.,28.);')
-camera='''vec3 worldToScout(vec3 p) {
+camera='''float desktopHeight(vec2 p) {
+ float h=0.;
+ for(int i=0;i<8;i++){
+  if(float(i)>=U.terrain.x)break;
+  vec4 r=U.surfaces[i];
+  float radius=min(U.terrain.z,min(r.z-r.x,r.w-r.y)*.5);
+  vec2 q=abs(p-(r.xy+r.zw)*.5)-(r.zw-r.xy)*.5+radius;
+  float inside=radius-length(max(q,vec2(0.)))-min(max(q.x,q.y),0.);
+  float blend=smoothstep(-U.terrain.y*.5,U.terrain.y*.5,inside);
+  h=mix(h,U.elevations[i/4][i%4],blend);
+ }
+ return h;
+}
+vec3 worldToScout(vec3 p) {
  float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
  float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
  float cr=cos(U.wall.y),sr=sin(U.wall.y);p=vec3(cr*p.x+sr*p.y,-sr*p.x+cr*p.y,p.z);
@@ -54,6 +67,9 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 mechanics; // lamp hinge, shadow enabled, track fade, roof face
  vec4 wall; // contact pitch, bank, rise, balance wheel travel
  vec4 receiver; // rover center in receiver points, reserved, pass (0 body, 1 floor, 2 proof)
+ vec4 surfaces[8]; // desktop rectangles in model coordinates
+ vec4 elevations[2];
+ vec4 terrain; // surface count, edge ramp width, corner radius, reserved
 } U;
 #define uResolution U.viewport.xy
 #define uEvent U.pose.z
@@ -69,7 +85,7 @@ ground='''
 float nativeShadow(vec2 uv,float style){
  if(U.mechanics.y<.5||length(uv)>3.6)return 0.;
  // Trace the authored geometry toward one fixed desktop-space studio light.
- vec3 p=scoutPoint(vec3(uv.x,-.767,uv.y));
+ vec3 p=scoutPoint(vec3(uv.x,-.767+desktopHeight(uv),uv.y));
  vec3 light=normalize(worldToScout(vec3(-.51,.90,.68)));
  float t=.022,visibility=1.;
  for(int i=0;i<32;i++){
@@ -119,8 +135,10 @@ void main(){
  float floorAlpha=shade+(1.-shade)*dust;
  vec3 floorRGB=vec3(.003,.005,.008)*shade+vec3(.119,.113,.094)*dust*(1.-shade);
  // Each authored angular beam originates at its real lens, including hinge and chassis tilt.
- vec3 floorLocal=scoutPoint(vec3(uv.x,-.767,uv.y));
- vec3 floorNormal=worldToScout(vec3(0.,1.,0.)),light=vec3(0.);
+ vec3 floorLocal=scoutPoint(vec3(uv.x,-.767+desktopHeight(uv),uv.y));
+ float dx=(desktopHeight(uv+vec2(.02,0.))-desktopHeight(uv-vec2(.02,0.)))/.04;
+ float dz=(desktopHeight(uv+vec2(0.,.02))-desktopHeight(uv-vec2(0.,.02)))/.04;
+ vec3 floorNormal=worldToScout(normalize(vec3(-dx,1.,-dz))),light=vec3(0.);
  if(U.receiver.w>0.&&power>0.)for(int k=0;k<2;k++){
   float side=k==0?-1.:1.;vec3 d=floorLocal-studyLampOrigin(style,side);
   float d2=dot(d,d);vec3 ray=d*inversesqrt(max(.0001,d2));
@@ -155,6 +173,13 @@ fragment float4 scout_track_stamp(float4 position [[position]],constant float4& 
  float shoulder=1.-smoothstep(.102,.148,abs(across));
  float alpha=.30*ink*shoulder;
  return float4(float3(.119,.113,.094)*alpha,alpha);
+}
+"""
+metal+=r"""
+fragment float4 scout_surface_probe(float4 position [[position]],constant NativeUniforms& U [[buffer(0)]]) {
+ float2 probes[6]={float2(-1.,0.),float2(0.,0.),float2(1.,0.),float2(5.,0.),float2(0.,-3.54545),float2(.2,-3.34545)};
+ float2 p=probes[min(5,int(position.x))];
+ return float4(desktopHeight(p,U),0.,0.,1.);
 }
 """
 metal+='\nvertex float4 scout_vertex(uint id [[vertex_id]]) {return float4(id==1?3.:-1.,id==2?3.:-1.,0.,1.);}\n'
