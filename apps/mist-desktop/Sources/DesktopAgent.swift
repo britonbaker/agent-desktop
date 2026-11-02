@@ -115,6 +115,13 @@ struct DesktopApp: Equatable {
             return ["in ","inside ","using ","switch to ","open ","bring "].contains {text.contains(" "+$0+value+" ")}
         }
     }
+    static func actionAfterSwitch(_ request:String,target:DesktopApp)->String {
+        guard let separator=request.range(of:"\\s+(?:and then|and|then)\\s+",options:[.regularExpression,.caseInsensitive]) else {return request}
+        let first=String(request[..<separator.lowerBound])
+        let route=directRequest(first,apps:[target],previous:"",history:[])
+        guard route?.intent == .switchApp,route?.targetAppID==target.id else {return request}
+        return String(request[separator.upperBound...])
+    }
     static func evidenceIsValid(_ explanation:ScreenExplanation, excerpt:String) -> Bool {
         let lines=ScreenContext.semanticLines(excerpt)
         return !explanation.answer.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty &&
@@ -144,7 +151,7 @@ struct DesktopApp: Equatable {
         let command=["bring ","switch ","take me ","go back","go to ","put me back","return to ","return me ","open "].contains(where:text.hasPrefix)
         guard command else {return nil}
         let words=Set(text.split(separator:" ").map(String.init))
-        if !words.isDisjoint(with:["delete","trash","send","purchase","buy","click","type","close","quit","kill","settings","permissions"]) {
+        if !words.isDisjoint(with:["delete","trash","send","purchase","buy","click","tap","focus","type","enter","write","scroll","navigate","select","press","remove","fill","choose","close","quit","kill","settings","permissions"]) {
             let named=apps.filter {actionTargetIsReferenced($0,request:request)}
             return DesktopRequest(intent:.performAction,targetAppID:named.count==1 ? named[0].id : "",explainAfterSwitch:false)
         }
@@ -252,15 +259,17 @@ struct DesktopApp: Equatable {
             else {permission=try await reviewer.respond(to:request,generating:DesktopActionRequestAuthorization.self,options:GenerationOptions(samplingMode:.greedy)).content}
             guard permission.explicitAction else {return "Tell me which control you want me to use when you're ready."}
             var target=apps.first {$0.pid==frontPID}
+            var actionGoal=request
             if !decision.targetAppID.isEmpty {
                 guard let named=Self.resolve(decision.targetAppID,in:apps),Self.targetIsReferenced(named,request:request) else {return "Which app should I use for that action?"}
                 if Self.actionTargetIsReferenced(named,request:request) {
                     guard let active=await activate(named,authorized:authorized) else {return "I couldn't verify that \(named.name) came forward."}
                     target=active
+                    actionGoal=Self.actionAfterSwitch(request,target:named)
                 }
             }
             guard let target else {return "Bring the app you want to use forward, then ask me again."}
-            do {return try await actions.run(request,app:target,authorized:authorized)}
+            do {return try await actions.run(actionGoal,app:target,authorized:authorized)}
             catch is CancellationError {throw CancellationError()}
             catch {actions.cancel();return "I couldn't read or verify the controls for that action. I stopped without repeating it."}
         case .unsupportedAction:

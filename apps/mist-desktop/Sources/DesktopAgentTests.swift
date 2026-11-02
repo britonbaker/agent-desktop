@@ -23,6 +23,12 @@ import FoundationModels
     try require(!DesktopAgent.targetIsReferenced(apps[1],request:"Go back",previous:"Finder"),"Do not substitute another previous app")
     try require(DesktopAgent.directRequest("If I asked, could you bring Safari up?",apps:apps,previous:"",history:[])==nil,"No direct hypothetical switch")
     try require(DesktopAgent.directRequest("Bring Safari up and delete Downloads",apps:apps,previous:"",history:[])?.intent == .performAction,"Compound actions must use the guarded action loop")
+    for verb in ["focus Draft","scroll down","press tab","select Search"] {
+        let routed=DesktopAgent.directRequest("Switch to Safari and \(verb)",apps:apps,previous:"",history:[])
+        try require(routed?.intent == .performAction && routed?.targetAppID == "com.apple.Safari","Switch must retain the requested control action")
+    }
+    try require(DesktopAgent.actionAfterSwitch("Switch to Safari and focus Draft",target:apps[1]) == "focus Draft","Remove only an already completed, explicitly named app switch")
+    try require(DesktopAgent.actionAfterSwitch("Write a note and focus Draft",target:apps[1]) == "Write a note and focus Draft","Preserve other compound tasks")
     let examples:[(String,DesktopIntent,String)] = [
         ("Could you bring Safari up for me?",.switchApp,"com.apple.Safari"),
         ("Take me over to Finder",.switchApp,"com.apple.finder"),
