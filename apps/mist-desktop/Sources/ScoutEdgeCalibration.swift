@@ -4,15 +4,15 @@ import CoreGraphics
 /// A repeating approach/reverse loop, with gentle travel along the edge.
 /// Parameter derivatives vanish at the ends, so reversing never snaps the heading.
 struct ScoutEdgeCalibration {
-    static let period=6.0
+    static let period=7.2
     static func pose(time:Double,right:Bool,area:CGRect,scale:Double,settings:ScoutWall.Settings=ScoutWall.Settings())->(center:CGPoint,heading:Double,forward:Bool,moving:Bool) {
         let phase=max(0,time).truncatingRemainder(dividingBy:period)
         let forward=phase<period/2
         let local=forward ? phase : phase-period/2
-        let t=min(1,max(0,(local-0.35)/2.3))
+        let t=min(1,max(0,(local-0.1)/3.4))
         let ease=ScoutGreeting.smooth(t),p=forward ? ease : 1-ease
         let direction=right ? 1.0 : -1.0
-        let travel=min(area.width*0.3,max(130,settings.radius*scale+85)),sway=min(40,area.height*0.08)
+        let travel=min(area.width*0.42,max(310,settings.radius*scale+230)),sway=min(160,area.height*0.2)
         let side=forward ? 1.0 : -1.0
         let dy=side*sway*Double.pi*sin(2*Double.pi*p)
         let heading=atan2(direction*travel,dy)

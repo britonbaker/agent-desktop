@@ -399,7 +399,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func activateCompanion() {
         let keepGreeting=greetingTimer != nil && conversationActive && greetingRelease==nil
         beginConversation(preserveGreeting:keepGreeting)
-        if conversationActive && !keepGreeting {greetScout()}
+        if conversationActive && !keepGreeting && edgeDebug==nil {greetScout()}
     }
     @objc private func chooseSpeechVoice(_ item:NSMenuItem) {
         guard let name=item.representedObject as? String,RoveSpeechVoice.available.contains(name) else {return}
@@ -447,7 +447,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         cueTask?.cancel();cueTask=nil;robotSounds.stop()
         conversationActive=false
         generation += 1; responseTask?.cancel(); responseTask = nil
-        if !preserveGreeting {
+        if !preserveGreeting && !(edgeDebug != nil && edgeLoopTimer != nil) {
             if greetingTimer != nil,let arrival=greetingArrival,Date().timeIntervalSince(arrival)>0.5 {greetingRelease=Date()}
             else {parkRover()}
         }
@@ -483,7 +483,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     private func startListening() {
-        if greetingTimer == nil {parkRover()}
+        if greetingTimer == nil && edgeLoopTimer == nil {parkRover()}
         do {
             try audio.start()
             update("listening", "Listening…")
@@ -567,10 +567,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         case "speak": break
         case "dragStart":
             tossTimer?.invalidate(); velocity = .zero; lastDrag = Date()
-            if companionID == "scout" { parkRover(); rover.position = panel.frame.origin }
+            if companionID == "scout" {if edgeLoopTimer==nil {parkRover()};rover.position=panel.frame.origin}
         case "drag":
             guard let dx = body["dx"] as? Double, let dy = body["dy"] as? Double else { return }
             if companionID == "scout" {
+                if edgeLoopTimer != nil {parkRover()}
                 let old = rover.target ?? rover.position
                 rover.target = bounded(CGPoint(x:old.x+dx,y:old.y-dy)); startDriveTimer(); return
             }
@@ -745,7 +746,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         rover.target = driveRoute.removeFirst(); startDriveTimer()
     }
     private func driveScout(to app:DesktopApp) {
-        guard companionID=="scout",let scout else {return}
+        guard companionID=="scout",edgeDebug==nil,let scout else {return}
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {return}
         guard let anchor=DockDestination.anchor(for:app)?.point,
               let screen=NSScreen.screens.first(where:{$0.frame.contains(anchor)}),screen==panel.screen else {return}
