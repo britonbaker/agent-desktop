@@ -40,11 +40,11 @@ struct RoveMain {
                     let app=active?.bundleIdentifier == Bundle.main.bundleIdentifier ? FrontWindow.underlyingApp() : active
                     guard let app,let window=FrontWindow.find(pid:app.processIdentifier) else {throw NSError(domain:"RoveFrontTest",code:1)}
                     let observation=await ScreenContext.observe(app:app.localizedName ?? "Unknown",windowID:window.id)
-                    let image=try await ScreenImage.capture(window:window.id,pageBounds:observation.pageBounds)
+                    let image=try await ScreenImage.capture(window:window.id)
                     if let index=CommandLine.arguments.firstIndex(of:"--save-test-image"),CommandLine.arguments.count>index+1 {
                         try image.write(to:URL(fileURLWithPath:CommandLine.arguments[index+1]))
                     }
-                    let source=(app.localizedName ?? "Unknown")+" — "+(observation.pageTitle ?? window.title)
+                    let source=observation.source(app:app.localizedName ?? "Unknown",fallbackTitle:window.title)
                     print("CAPTURE SOURCE:",source,"IMAGE BYTES:",image.count)
                     let started=Date()
                     print("VISION ANSWER:",try await LocalVision.shared.explain(question:"What am I looking at? Explain the main page and what it is for.",excerpt:observation.excerpt,image:image,source:source))
@@ -176,6 +176,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     private var tapPeaks:[String]=[]
     private var lastMotionSample=0.0
     private var acceptedKnocks=0
+    private var dismissedKnocks=0
     private var ready = false
     private var lastExternalApp = NSWorkspace.shared.frontmostApplication?.localizedName ?? "unknown"
     private var lastExternalPID = NSWorkspace.shared.frontmostApplication?.processIdentifier ?? 0
@@ -369,7 +370,12 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if strength>=self.detector.threshold*0.5 {
                 self.tapPeaks.append(String(format:"%.4f · %.2f seconds since keyboard",strength,age));self.tapPeaks=Array(self.tapPeaks.suffix(12))
             }
-            if self.detector.update(time: time, strength: strength, keyboardAge: age) {
+            if let gesture=self.detector.updateGesture(time: time, strength: strength, keyboardAge: age) {
+                if gesture == .triple {
+                    self.dismissedKnocks+=1
+                    self.stop()
+                    return
+                }
                 self.acceptedKnocks+=1
                 NSLog("Rove: double tap accepted")
                 self.activateCompanion()
@@ -422,7 +428,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func knockDiagnostics() {
         let age=lastMotionSample>0 ? String(format:"%.1f",ProcessInfo.processInfo.systemUptime-lastMotionSample) : "no"
         let alert=NSAlert();alert.messageText="Rove knock diagnostics"
-        alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nAccessibility trusted: \(AXIsProcessTrusted())\nShift events: \(shiftEvents); accepted gestures: \(shiftActivations)\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
+        alert.informativeText="Sensor samples: \(motion.samples)\nLast sample: \(age) seconds ago\nAccepted pairs: \(acceptedKnocks); dismiss triples: \(dismissedKnocks)\nThreshold: \(detector.threshold)\nDouble Shift monitor: \(globalShiftMonitor == nil ? "unavailable" : "installed")\nAccessibility trusted: \(AXIsProcessTrusted())\nShift events: \(shiftEvents); accepted gestures: \(shiftActivations)\nRecent motion peaks (strength and keyboard timing only):\n"+tapPeaks.joined(separator:"\n")
         alert.addButton(withTitle:"Done");alert.runModal()
     }
     @objc private func explainWindow() { respond("Explain the page or window I am looking at. Start with its main content and what I can do next.") }
@@ -653,11 +659,13 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             self.rover.position=pose.position;self.rover.heading=pose.heading
             self.rover.distance=initialDistance+pose.distance
             self.rover.speed=pose.moving ? 60 : 0
-            self.panel.setFrameOrigin(pose.position);self.refreshControlPlacement();self.sendDrivePose()
+            let safe=ScoutWall.confinedCenter(CGPoint(x:pose.position.x+150,y:pose.position.y+200),heading:pose.heading,scale:scale,area:area)
+            self.rover.position=CGPoint(x:safe.x-150,y:safe.y-200)
+            self.panel.setFrameOrigin(self.rover.position);self.refreshControlPlacement();self.sendDrivePose()
             self.scout?.wheeliePitch=Float(pose.pitch)
             if age>=motion.duration && !holding {
                 timer.invalidate();self.greetingTimer=nil;self.greetingRelease=nil;self.greetingArrival=nil;self.rover.park();self.sendDrivePose()
-                self.wanderHome=pose.position;self.nextWander=Date().addingTimeInterval(7)
+                self.wanderHome=self.rover.position;self.nextWander=Date().addingTimeInterval(7)
             }
         }
     }
@@ -685,7 +693,12 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func bounded(_ point: CGPoint) -> CGPoint {
         guard let area = (panel.screen ?? NSScreen.main)?.visibleFrame else { return point }
-        let padding=companionID == "scout" ? 112.0 : 0
+        if companionID=="scout",let scout {
+            let scale=Double(scout.uniforms(width:600,height:760)[2])
+            let center=ScoutWall.confinedCenter(CGPoint(x:point.x+150,y:point.y+200),heading:rover.heading,scale:scale,area:area)
+            return CGPoint(x:center.x-150,y:center.y-200)
+        }
+        let padding=0.0
         return CGPoint(x:min(area.maxX-panel.frame.width+padding,max(area.minX-padding,point.x)),y:min(area.maxY-panel.frame.height,max(area.minY,point.y)))
     }
     private func startDriveTimer() {

@@ -3,7 +3,7 @@ import CoreGraphics
 
 struct ScreenContext {
     static func readableLines(_ excerpt:String) -> [String] {
-        let preferred=["heading:","statictext:","text:","paragraph:","webarea:","link:"]
+        let preferred=["window:","container:","selected context:","heading:","statictext:","text:","paragraph:","webarea:","link:"]
         let lines=excerpt.components(separatedBy:"\n")
         let content=lines.filter { line in
             guard preferred.contains(where:{line.lowercased().hasPrefix($0)}),let colon=line.firstIndex(of:":") else {return false}
@@ -57,7 +57,7 @@ struct ScreenContext {
             let root=try? JSONSerialization.jsonObject(with:output) as? [String:Any]
             let data=root?["data"] as? [String:Any]
             let page=(data?["tree"] as? [String:Any]).flatMap {selectedPage($0)}
-            return ScreenObservation(excerpt:summarize(output),pageTitle:page?["name"] as? String,pageBounds:page.flatMap {rect($0)})
+            return ScreenObservation(excerpt:summarize(output),pageTitle:page?["name"] as? String,pageBounds:page.flatMap {rect($0)},windowTitle:(data?["window"] as? [String:Any])?["title"] as? String,hostContext:(data?["tree"] as? [String:Any]).map {hostContext($0)} ?? [])
         } catch {return ScreenObservation(excerpt:"Could not read this window: \(error.localizedDescription)",pageTitle:nil,pageBounds:nil)}
     }
     private static func rect(_ node:[String:Any])->CGRect? {
@@ -85,6 +85,25 @@ struct ScreenContext {
         find(tree,0)
         return pages.sorted(by:{$0.0>$1.0}).first?.1
     }
+    // Preserve the shell around the selected page, without reading unrelated sidebar entries.
+    static func hostContext(_ tree:[String:Any])->[String] {
+        let viewport=rect(tree),page=selectedPage(tree)
+        let targetRef=page?["ref_id"] as? String
+        var ancestors:[String]=[],selected:[String]=[]
+        func walk(_ node:[String:Any],path:[String]) {
+            guard allowed(node,viewport:viewport) else {return}
+            let role=(node["role"] as? String ?? "").lowercased(),name=node["name"] as? String ?? ""
+            let isPage=role=="webarea"
+            if isPage,let page,NSDictionary(dictionary:node).isEqual(to:page) || (targetRef != nil && node["ref_id"] as? String==targetRef) {ancestors=path}
+            let states=node["states"] as? [String] ?? []
+            if (states.contains("selected") || node["selected"] as? Bool==true),["tab","row","outlineitem","radiobutton"].contains(role),!name.isEmpty {selected.append("Selected context: "+String(name.prefix(160)))}
+            let next=path+(isPage && !name.isEmpty ? ["Container: "+String(name.prefix(160))] : [])
+            for child in node["children"] as? [[String:Any]] ?? [] {walk(child,path:next)}
+        }
+        walk(tree,path:[])
+        var seen=Set<String>()
+        return (ancestors+selected).filter {seen.insert($0).inserted}.prefix(6).map { $0 }
+    }
     static func summarize(_ output:Data)->String {
         guard let root=try? JSONSerialization.jsonObject(with:output) as? [String:Any] else {return "Screen read did not return usable content."}
         guard root["ok"] as? Bool==true,let data=root["data"] as? [String:Any] else {
@@ -94,6 +113,7 @@ struct ScreenContext {
         var lines:[String]=[],seen=Set<String>(),remaining=5000
         if let window=data["window"] as? [String:Any],let title=window["title"] as? String {lines.append("Window: \(title)")}
         let tree=data["tree"] as? [String:Any] ?? [:],viewport=rect(data["tree"] as? [String:Any] ?? [:])
+        lines.append(contentsOf:hostContext(tree))
         func walk(_ node:[String:Any]) {
             guard remaining>0,allowed(node,viewport:viewport) else {return}
             let role=node["role"] as? String ?? ""
@@ -131,4 +151,14 @@ struct ScreenObservation {
     let excerpt:String
     let pageTitle:String?
     let pageBounds:CGRect?
+    var windowTitle:String?=nil
+    var hostContext:[String]=[]
+    func source(app:String,fallbackTitle:String?)->String {
+        (["Host application: "+app,"Host window: "+(windowTitle ?? fallbackTitle ?? "Unknown window")]+hostContext+["Embedded page: "+(pageTitle ?? "No page title available")]).joined(separator:"\n")
+    }
+    func orientation(app:String,fallbackTitle:String?)->String {
+        let title=(windowTitle ?? fallbackTitle ?? "").trimmingCharacters(in:.whitespacesAndNewlines)
+        let generic=["","front window","window",app.lowercased()]
+        return "You're in \(app)"+(generic.contains(title.lowercased()) ? ". " : ", in the \(String(title.prefix(160))) window. ")
+    }
 }

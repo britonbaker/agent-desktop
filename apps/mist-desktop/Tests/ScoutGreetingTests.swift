@@ -14,8 +14,10 @@ import CoreGraphics
             precondition(abs(sin(peak.heading)-expected)<0.001)
             let before=motion.pose(at:contact-0.01)
             precondition(before.pitch==0)
-            let front=peak.position.x+150+expected*(0.726*55-(1-cos(peak.pitch))*0.862*55)
-            precondition(abs(front-(expected<0 ? area.minX+2 : area.maxX-2))<0.001)
+            let safe=ScoutWall.confinedCenter(CGPoint(x:peak.position.x+150,y:peak.position.y+200),heading:peak.heading,scale:55,area:area)
+            let extent=ScoutWall.clearance(heading:peak.heading,scale:55)
+            precondition(safe.x-extent.width>=area.minX-0.001 && safe.x+extent.width<=area.maxX+0.001)
+            precondition(ScoutWall.pose(center:safe,heading:peak.heading,scale:55,area:area).contact,"Safe tire boundary must still reach the curved ramp")
             for frame in 0...Int(motion.duration*60) {
                 let pose=motion.pose(at:Double(frame)/60)
                 precondition(pose.position.y==origin.y && pose.position.x.isFinite)

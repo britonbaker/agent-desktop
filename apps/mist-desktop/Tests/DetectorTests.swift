@@ -22,6 +22,19 @@ import Foundation
         precondition(count(peaks: [1.5, 1.8], keyboard: [0.5]) == 1, "pair after typing quiet period accepted")
         precondition(count(peaks: [], sustained: true) == 0, "sustained vibration rejected")
         precondition(count(peaks: []) == 0, "quiet baseline rejected")
-        print("PASS: 10 double-tap policy cases")
+        func gestures(_ peaks:[Double],keys:[Double]=[])->[TapGesture] {
+            var detector=TapDetector(threshold:0.006),result:[TapGesture]=[]
+            for n in 0...400 {
+                let time=Double(n)/100,lastKey=keys.filter {$0<=time}.last ?? -100
+                if let gesture=detector.updateGesture(time:time,strength:peaks.contains {abs($0-time)<0.005} ? 0.01 : 0.0002,keyboardAge:time-lastKey) {result.append(gesture)}
+            }
+            return result
+        }
+        precondition(gestures([1,1.3]) == [.double])
+        precondition(gestures([1,1.3,1.6]) == [.triple],"Triple dismiss must never first activate a double")
+        precondition(gestures([1,1.3,1.6,1.9]).isEmpty,"Extra impacts are not a gesture")
+        precondition(gestures([1,1.3,1.6],keys:[1.8]).isEmpty,"Typing cancels a pending dismiss")
+        precondition(gestures([1,1.1,1.2]).isEmpty,"Ringing is not a dismiss gesture")
+        print("PASS double/triple taps: pair activation, exclusive triple dismissal, ringing, extra impacts and keyboard suppression")
     }
 }

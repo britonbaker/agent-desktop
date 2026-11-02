@@ -22,6 +22,15 @@ import CoreGraphics
             precondition(abs(pose.pitch-previous.pitch)<0.08 && abs(pose.roll-previous.roll)<0.08,"continuous ramp, no edge snap")
             previous=pose
         }
-        print("PASS curved wall: flat floor, mirrored side bank, angled single-wheel entry, corners, offset display and continuous approach")
+        for heading in stride(from:0.0,to:2*Double.pi,by:Double.pi/12) {
+            for point in [CGPoint(x:-30,y:400),CGPoint(x:1550,y:400),CGPoint(x:-20,y:1000)] {
+                let safe=ScoutWall.confinedCenter(point,heading:heading,scale:55,area:area)
+                let bounds=ScoutWall.clearance(heading:heading,scale:55)
+                precondition(safe.x-bounds.width>=area.minX-0.001 && safe.x+bounds.width<=area.maxX+0.001)
+                precondition(safe.y-bounds.height>=area.minY-0.001 && safe.y+bounds.height<=area.maxY+0.001)
+                precondition(ScoutWall.pose(center:safe,heading:heading,scale:55,area:area).contact)
+            }
+        }
+        print("PASS curved wall: tire envelope stays in bounds at 24 headings; flat floor, mirrored side bank, angled single-wheel entry, corners, offset display and continuous approach")
     }
 }

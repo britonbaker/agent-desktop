@@ -24,6 +24,14 @@ import Foundation
         let denied = try summarize(["ok":false,"error":["code":"PERM_DENIED","message":"Accessibility required"]])
         precondition(denied.contains("PERM_DENIED") && !denied.contains("useful page"))
         precondition(ScreenContext.summarize(Data("invalid".utf8)).contains("did not return"))
-        print("PASS: page text, partial flag, secure-field exclusion, duplicate suppression, permission and malformed errors")
+        let nested:[String:Any]=["ok":true,"data":["window":["title":"Rove workspace"],"tree":["role":"window","children":[["role":"tab","name":"Rove desktop assistant","states":["selected"]],["role":"tab","name":"Unrelated project"],["role":"webarea","name":"Codex workspace","children":[["role":"webarea","name":"Rove repository · GitHub","children":[["role":"main","children":[["role":"statictext","name":"Repository source code"]]]]]]]]]]]
+        let nestedText=try summarize(nested)
+        precondition(nestedText.contains("Container: Codex workspace") && nestedText.contains("Selected context: Rove desktop assistant") && nestedText.contains("Rove repository"))
+        precondition(!nestedText.contains("Unrelated project"),"Do not substitute unrelated sidebar tasks for active context")
+        let identity=ScreenObservation(excerpt:nestedText,pageTitle:"GitHub",pageBounds:nil,windowTitle:"Rove workspace")
+        precondition(identity.source(app:"Codex",fallbackTitle:nil).contains("Host application: Codex"))
+        precondition(identity.orientation(app:"Codex",fallbackTitle:nil)=="You're in Codex, in the Rove workspace window. ")
+        precondition(ScreenObservation(excerpt:"",pageTitle:nil,pageBounds:nil).orientation(app:"Codex",fallbackTitle:"Front window")=="You're in Codex. ")
+        print("PASS: nested host, selected task and page identity; page text, partial flag, secure-field exclusion, duplicate suppression, permission and malformed errors")
     }
 }

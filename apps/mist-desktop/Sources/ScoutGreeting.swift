@@ -15,7 +15,7 @@ struct ScoutGreeting {
         let t=min(1,max(0,value));return t*t*(3-2*t)
     }
     static func destination(from origin:CGPoint,in area:CGRect,pointsPerUnit:Double) -> CGPoint {
-        let inset=pointsPerUnit*0.726+2
+        let inset=ScoutWall.clearance(heading:.pi/2,scale:pointsPerUnit).width
         let center=origin.x+150
         let left=area.minX+inset-150,right=area.maxX-inset-150
         return CGPoint(x:center<area.midX ? left : right,y:origin.y)

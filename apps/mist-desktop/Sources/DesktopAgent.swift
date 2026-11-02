@@ -306,7 +306,8 @@ struct DesktopApp: Equatable {
         let window=FrontWindow.find(pid:pid)
         let observation=await ScreenContext.observe(app:app,windowID:window?.id)
         let excerpt=observation.excerpt
-        lastEvidence=excerpt;lastSource=app + " — " + (observation.pageTitle ?? window?.title ?? "Front window")
+        lastEvidence=excerpt;lastSource=observation.source(app:app,fallbackTitle:window?.title)
+        let orientation=observation.orientation(app:app,fallbackTitle:window?.title)
         guard authorized(),!Task.isCancelled else {throw CancellationError()}
         let textUnavailable=excerpt.hasPrefix("Screen unavailable:") || excerpt.hasPrefix("Screen read") || excerpt.hasPrefix("Could not read")
         if textUnavailable && !VisionConfiguration.installed {
@@ -315,13 +316,13 @@ struct DesktopApp: Equatable {
         if VisionConfiguration.installed {
             onStatus?("Understanding \(app) locally…")
             let image:Data?
-            if let window,ScreenImage.permitted {image=try? await ScreenImage.capture(window:window.id,pageBounds:observation.pageBounds)} else {image=nil}
+            if let window,ScreenImage.permitted {image=try? await ScreenImage.capture(window:window.id)} else {image=nil}
             guard authorized(),!Task.isCancelled else {throw CancellationError()}
             if image==nil && textUnavailable {return "I couldn’t capture this window or read its text. Check Rove’s Screen Recording and Accessibility permissions in System Settings."}
             let answer=try await LocalVision.shared.explain(question:request,excerpt:textUnavailable ? "Accessibility text unavailable." : excerpt,image:image,source:lastSource)
-            return image==nil ? "From the window's readable text: " + answer : answer
+            return orientation + (image==nil ? "From the window's readable text: " + answer : answer)
         }
-        return try await Self.explainExcerpt(excerpt,request:request)
+        return orientation + (try await Self.explainExcerpt(excerpt,request:request))
     }
     static func explainExcerpt(_ excerpt:String,request:String,diagnostics:((String)->Void)? = nil) async throws -> String {
         let content=ScreenContext.semanticLines(excerpt).joined(separator:"\n")

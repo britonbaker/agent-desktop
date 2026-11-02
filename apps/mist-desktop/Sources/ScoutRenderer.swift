@@ -256,6 +256,30 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         print("PASS fixed world-light shadow at four headings; beams extend beyond body window and fade before receiver edge; ground GPU max ms:",worst)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.
+    func wallBoundaryTest() throws {
+        let area=CGRect(x:0,y:0,width:1512,height:982),w=600,h=760,scale=55.0
+        let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
+        desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
+        for index in 0..<12 {
+            let heading=Double(index)*Double.pi/6
+            for requested in [CGPoint(x:0,y:450),CGPoint(x:1512,y:450),CGPoint(x:0,y:982)] {
+                let center=ScoutWall.confinedCenter(requested,heading:heading,scale:scale,area:area)
+                let wall=ScoutWall.pose(center:center,heading:heading,scale:scale,area:area)
+                guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"WallBoundary",code:1)}
+                var values=uniforms(width:w,height:h)
+                values[2]=55;values[3]=2;values[4]=Float(center.x<area.midX ? 6 : -6);values[5]=49.23;values[6]=Float(center.y>area.midY ? -6 : 6)
+                values[8]=Float(heading);values[11]=0;values[14]=0;values[24]=Float(wall.pitch);values[25]=Float(wall.roll);values[26]=Float(wall.height);values[31]=0
+                encode(texture:texture,command:command,values:values);command.commit();command.waitUntilCompleted()
+                var raw=[UInt16](repeating:0,count:w*h*4)
+                raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:w*8,from:MTLRegionMake2D(0,0,w,h),mipmapLevel:0)}
+                for y in 0..<h {for x in 0..<w where Float(Float16(bitPattern:raw[(y*w+x)*4+3]))>0.9 {
+                    let desktop=CGPoint(x:center.x+Double(x)/2-150,y:center.y+Double(h-y)/2-200)
+                    guard area.contains(desktop) else {throw NSError(domain:"WallBoundary",code:2,userInfo:[NSLocalizedDescriptionKey:"Body clips display at heading \(heading), point \(desktop)"])}
+                }}
+            }
+        }
+        print("PASS actual Metal silhouette stays inside display at 12 headings, both side walls and corner with camera parallax")
+    }
     func selfTest() throws {
         let w=600,h=760
         let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
@@ -275,5 +299,6 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         print("PASS authored front/rear tread stamp textures")
         print("GPU render: \((command.gpuEndTime-command.gpuStartTime)*1000) ms")
         print("PASS native Scout: \(covered) solid pixels, \(bright) EDR channels above 1.0")
+        try wallBoundaryTest()
     }
 }
