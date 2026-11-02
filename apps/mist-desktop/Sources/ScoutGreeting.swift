@@ -27,7 +27,7 @@ struct ScoutGreeting {
         while turn > .pi {turn-=2 * .pi}
         while turn < -.pi {turn+=2 * .pi}
         let direction=heading<0 ? -1.0 : 1.0
-        let pitch=0.62*Self.smooth(contact/0.42)*(1-Self.smooth((contact-1.45)/0.6))
+        let pitch=1.12*Self.smooth(contact/0.60)*(1-Self.smooth((contact-1.45)/0.6))
         let push=(1-cos(pitch))*0.862*pointsPerUnit
         let retreat=16*Self.smooth((contact-2.05)/0.45)
         let position=CGPoint(x:origin.x+(destination.x-origin.x)*roll+direction*(push-retreat),y:origin.y)

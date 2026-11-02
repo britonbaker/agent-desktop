@@ -226,3 +226,9 @@ The edge-calibration loop now makes larger passes: roughly 310 points into the d
 
 
 Scout preserves fractional simulation positions inside AppKit's rounded window frames, including the ground receiver. The drive timer uses elapsed time and continues during drags. Steering has a bounded angular acceleration. A damped suspension response transfers acceleration, braking and turn loads into small chassis pitch, roll and compression; shader tire contacts remain in the base frame. In-place turns rotate the left and right treads in opposite directions and leave contact-arc scrub marks with the existing 1.1-second fade. Reduced Motion disables suspension response and marks. Pure motion tests and the native Metal tire-contact probe cover these mechanics; their perceived weight and smoothness still need live review.
+
+
+Knock grouping can recognize a fresh, stronger impact during the previous knock's ringing tail. It requires a sharp rise above a short local strength envelope, retains the calibrated threshold and typing quiet period, and still waits to distinguish double activation from triple dismissal. The edge-approach timer runs in common run-loop modes so UI tracking does not pause it. Replaying a missed right-palm-rest pair recognized that pair with the revised detector; the saved three-minute typing sample produced no activations at the installed threshold. These replays do not establish a long-term false-trigger rate.
+
+
+On a knock or double-Shift summon, Scout continues from the curved side bezel into a roughly 64-degree rear-axle climb, holds while conversing, and rolls back down when dismissed. The climb starts only after bezel contact. His roof switches back to its readout as he rises, leaving the front display as his only face. Manual edge-calibration settings remain unchanged.

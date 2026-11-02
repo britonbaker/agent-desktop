@@ -593,7 +593,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func parkRover() {
         edgeLoopTimer?.invalidate();edgeLoopTimer=nil;scout?.calibrationActive=false;scout?.calibrationClimb=0;edgeDebug?.setMotionPaused(true)
         scout?.roofFace=false
-        greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0
+        greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0;scout?.greetingClimb=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
         rover.maximumSpeed=RoverDrive.cruiseSpeed;rover.acceleration=RoverDrive.cruiseAcceleration
         rover.braking=RoverDrive.cruiseBraking;rover.jerk=RoverDrive.cruiseJerk
@@ -724,7 +724,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let began=Date(),initialDistance=rover.distance
         greetingRelease=nil;greetingArrival=began.addingTimeInterval(0.3+motion.approach)
         let beganAsConversation=conversationActive
-        greetingTimer=Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
+        let clock=Timer(timeInterval:1/60,repeats:true) { [weak self] timer in
             guard let self else {timer.invalidate();return}
             if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {self.parkRover();return}
             if beganAsConversation && !self.conversationActive && self.greetingRelease==nil {self.greetingRelease=Date()}
@@ -737,12 +737,15 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let safe=ScoutWall.confinedCenter(CGPoint(x:pose.position.x+150,y:pose.position.y+200),heading:pose.heading,scale:scale,area:area,settings:ScoutArena.shared.settings(for:screen))
             self.rover.position=CGPoint(x:safe.x-150,y:safe.y-200)
             self.panel.setFrameOrigin(self.rover.position);self.refreshControlPlacement();self.sendDrivePose()
-            self.scout?.wheeliePitch=0 // The shared contact curve supplies the actual climb.
+            let contact=ScoutWall.pose(center:safe,heading:pose.heading,scale:scale,area:area,settings:ScoutArena.shared.settings(for:screen)).contact
+            self.scout?.greetingClimb=contact ? Float(pose.pitch) : 0
+            self.scout?.wheeliePitch=0 // Rear-axle climb is gated by real bezel contact.
             if age>=motion.duration && !holding {
-                timer.invalidate();self.greetingTimer=nil;self.greetingRelease=nil;self.greetingArrival=nil;self.rover.park();self.sendDrivePose()
+                timer.invalidate();self.greetingTimer=nil;self.greetingRelease=nil;self.greetingArrival=nil;self.scout?.greetingClimb=0;self.rover.park();self.sendDrivePose()
                 self.wanderHome=self.rover.position;self.nextWander=Date().addingTimeInterval(7)
             }
         }
+        greetingTimer=clock;RunLoop.main.add(clock,forMode:.common)
     }
     @objc private func driveScoutLoop() {
         guard companionID == "scout" else { return }

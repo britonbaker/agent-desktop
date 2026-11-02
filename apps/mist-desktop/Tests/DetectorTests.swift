@@ -37,6 +37,31 @@ import Foundation
         precondition(gestures([1,1.1,1.2]).isEmpty,"Ringing is not a dismiss gesture")
         precondition(gestures([1,1.03,1.07,1.3,1.33,1.37]) == [.double],"Real impacts with threshold ringing still form a pair")
         precondition(gestures([1,1.03,1.07,1.3,1.33,1.37,1.6,1.63,1.67]) == [.triple],"Ringing must not consume triple dismissal")
+        // A fresh second attack can overlap the first impact's long ringing tail.
+        // The old sliding echo lockout swallowed this pair despite both impacts
+        // exceeding the calibrated threshold.
+        func overlapping(second:Bool,third:Bool=false)->[TapGesture] {
+            var detector=TapDetector(threshold:0.012),result:[TapGesture]=[]
+            for n in 0...3000 {
+                let time=Double(n)/1000,age=time-1
+                let first=age>=0 && age<0.45 ? 0.014*exp(-age*2)*abs(cos(age*Double.pi*22)) : 0
+                let next=age-0.23
+                let other=second && next>=0 && next<0.4 ? 0.022*exp(-next*6)*abs(cos(next*Double.pi*22)) : 0
+                let finalAge=age-0.46
+                let final=third && finalAge>=0 && finalAge<0.4 ? 0.035*exp(-finalAge*6)*abs(cos(finalAge*Double.pi*22)) : 0
+                if let gesture=detector.updateGesture(time:time,strength:max(0.0002,first+other+final),keyboardAge:100) {result.append(gesture)}
+            }
+            return result
+        }
+        precondition(overlapping(second:true)==[.double],"Recognize a second attack through a ringing tail")
+        precondition(overlapping(second:true,third:true)==[.triple],"Overlapping triples dismiss without activating first")
+        precondition(overlapping(second:false).isEmpty,"One decaying impact never becomes a pair")
+        var ramp=TapDetector(threshold:0.012),rampEvents=0
+        for n in 0...3000 {
+            let time=Double(n)/1000,strength=time>=1 && time<2 ? 0.012+(time-1)*0.025 : 0.0002
+            if ramp.updateGesture(time:time,strength:strength,keyboardAge:100) != nil {rampEvents+=1}
+        }
+        precondition(rampEvents==0,"A slowly growing vibration is not a fresh knock attack")
         print("PASS double/triple taps: pair activation, exclusive triple dismissal, ringing, extra impacts and keyboard suppression")
     }
 }
