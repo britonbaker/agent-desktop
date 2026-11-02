@@ -57,7 +57,7 @@ struct ScreenContext {
             let root=try? JSONSerialization.jsonObject(with:output) as? [String:Any]
             let data=root?["data"] as? [String:Any]
             let page=(data?["tree"] as? [String:Any]).flatMap {selectedPage($0)}
-            return ScreenObservation(excerpt:summarize(output),pageTitle:page?["name"] as? String,pageBounds:page.flatMap {rect($0)},windowTitle:(data?["window"] as? [String:Any])?["title"] as? String,hostContext:(data?["tree"] as? [String:Any]).map {hostContext($0)} ?? [])
+            return ScreenObservation(excerpt:summarize(output),pageTitle:page?["name"] as? String,pageBounds:page.flatMap {rect($0)},windowTitle:(data?["window"] as? [String:Any])?["title"] as? String,hostContext:(data?["tree"] as? [String:Any]).map {hostContext($0)} ?? [],controls:root.map {DesktopActionPolicy.elements(from:$0)} ?? [])
         } catch {return ScreenObservation(excerpt:"Could not read this window: \(error.localizedDescription)",pageTitle:nil,pageBounds:nil)}
     }
     private static func rect(_ node:[String:Any])->CGRect? {
@@ -67,7 +67,8 @@ struct ScreenContext {
     }
     private static func allowed(_ node:[String:Any],viewport:CGRect?)->Bool {
         let role=(node["role"] as? String ?? "").lowercased()
-        guard !role.contains("secure"),node["protected"] as? Bool != true else {return false}
+        let states=node["states"] as? [String] ?? []
+        guard !role.contains("secure"),node["protected"] as? Bool != true,node["hidden"] as? Bool != true,node["offscreen"] as? Bool != true,!states.contains("hidden") else {return false}
         if role=="webarea",let bounds=rect(node) {
             guard bounds.width>1,bounds.height>1 else {return false}
             if let viewport,!viewport.intersects(bounds) {return false}
@@ -103,6 +104,10 @@ struct ScreenContext {
         walk(tree,path:[])
         var seen=Set<String>()
         return (ancestors+selected).filter {seen.insert($0).inserted}.prefix(6).map { $0 }
+    }
+    static func identity(_ root:[String:Any])->String {
+        let data=root["data"] as? [String:Any] ?? [:],tree=data["tree"] as? [String:Any] ?? [:]
+        return ([((data["window"] as? [String:Any])?["title"] as? String ?? ""),selectedPage(tree)?["name"] as? String ?? ""]+hostContext(tree)).joined(separator:"\u{1f}")
     }
     static func summarize(_ output:Data)->String {
         guard let root=try? JSONSerialization.jsonObject(with:output) as? [String:Any] else {return "Screen read did not return usable content."}
@@ -153,6 +158,17 @@ struct ScreenObservation {
     let pageBounds:CGRect?
     var windowTitle:String?=nil
     var hostContext:[String]=[]
+    var controls:[ActionElement]=[]
+    var identity:String {([windowTitle ?? "",pageTitle ?? ""]+hostContext).joined(separator:"\u{1f}")}
+    var offeredControl:String? {
+        let choices=controls.filter {element in
+            guard ["button","link"].contains(element.role.lowercased()),!element.protected,element.enabled,!element.hidden,!element.selected,
+                  !element.name.isEmpty,element.name.count<=80,!["back","forward","close","more","menu","skip to content"].contains(element.name.lowercased()) else {return false}
+            if let pageBounds {guard let bounds=element.bounds,pageBounds.intersects(bounds) else {return false}}
+            return DesktopActionPolicy.risk(kind:"click",text:"",key:"",element:element,goal:"",appID:"",modelRisk:false) == .ordinary
+        }.map(\.name)
+        return choices.first(where:{["readme","open details","overview","details","files"].contains($0.lowercased())}) ?? choices.first
+    }
     func source(app:String,fallbackTitle:String?)->String {
         (["Host application: "+app,"Host window: "+(windowTitle ?? fallbackTitle ?? "Unknown window")]+hostContext+["Embedded page: "+(pageTitle ?? "No page title available")]).joined(separator:"\n")
     }

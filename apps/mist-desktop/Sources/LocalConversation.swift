@@ -13,6 +13,8 @@ final class LocalConversation {
     var onHeard: ((String) -> Void)?
     var onTurn: ((String) -> Void)?
     var onInterrupt: (() -> Void)?
+    var onCancelRequest: (() -> Void)?
+    var onSpeechBegan: (() -> Void)?
     var onStatus: ((String) -> Void)?
     var onDiagnostic: ((String) -> Void)?
     private var diagnosticTimer: Timer?
@@ -131,7 +133,7 @@ final class LocalConversation {
         audioLock.lock(); request?.endAudio(); audioLock.unlock()
         task?.cancel(); turn.reset()
         let req = SFSpeechAudioBufferRecognitionRequest(); req.requiresOnDeviceRecognition = true; req.shouldReportPartialResults = true; req.taskHint = .dictation
-        req.contextualStrings = ["apps", "list apps", "what apps are running", "where am I", "read", "controls", "switch to", "click", "type", "scroll", "confirm action", "do it now", "cancel", "repeat", "stop", "wait", "end conversation"] + NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
+        req.contextualStrings = ["apps", "list apps", "what apps are running", "what am I looking at", "what is on my screen", "open that", "click that", "where am I", "read", "controls", "switch to", "click", "type", "scroll", "confirm action", "do it now", "cancel", "repeat", "stop", "wait", "end conversation"] + NSWorkspace.shared.runningApplications.compactMap(\.localizedName)
         audioLock.lock(); request = req; audioLock.unlock()
         task = recognizer?.recognitionTask(with: req) { [weak self] result, error in
             DispatchQueue.main.async {
@@ -141,6 +143,8 @@ final class LocalConversation {
                     self.recognizedResults += 1
                     let words = result.bestTranscription.formattedString
                     if TurnPolicy.isEcho(words, spoken: self.spoken) { if result.isFinal { self.beginRecognition() }; return }
+                    if ["stop","wait","pause","cancel"].contains(TurnPolicy.normalized(words)),self.turn.text != words {self.onCancelRequest?()}
+                    else if self.turn.text.isEmpty,TurnPolicy.interrupts(words) {self.onSpeechBegan?()}
                     if self.speaking && TurnPolicy.interrupts(words) { self.interruptSpeech(); self.onInterrupt?() }
                     guard !self.speaking else { return }
                     self.retries = 0

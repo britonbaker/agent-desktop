@@ -8,6 +8,16 @@ import ApplicationServices
 @main
 struct RoveMain {
     static func main() {
+        if CommandLine.arguments.contains("--visual-grounding-self-test") {
+            setbuf(stdout,nil)
+            Task { @MainActor in do {try await runVisualGroundingTests();await LocalVision.shared.stop();exit(0)} catch {print("FAIL:",error);await LocalVision.shared.stop();exit(1)}}
+            RunLoop.main.run();return
+        }
+        if let index=CommandLine.arguments.firstIndex(of:"--screen-actions-self-test"),CommandLine.arguments.count>index+1 {
+            setbuf(stdout,nil)
+            Task { @MainActor in do {try await runScreenActionTests(statePath:CommandLine.arguments[index+1]);await LocalVision.shared.stop();exit(0)} catch {print("FAIL:",error);await LocalVision.shared.stop();exit(1)}}
+            RunLoop.main.run();return
+        }
         if let index=CommandLine.arguments.firstIndex(of:"--actions-self-test"),CommandLine.arguments.count>index+1 {
             setbuf(stdout,nil)
             Task { @MainActor in do {try await runDesktopActionsTests(statePath:CommandLine.arguments[index+1]);exit(0)} catch {print("FAIL:",error);exit(1)}}
@@ -211,8 +221,12 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         loadCompanion()
         panel.orderFrontRegardless()
         audio.onTurn = { [weak self] text in self?.respond(text) }
+        audio.onCancelRequest = { [weak self] in self?.interruptCurrentWork() }
+        audio.onSpeechBegan = { [weak self] in
+            guard let self,["thinking","speaking"].contains(self.state) else {return};self.interruptCurrentWork(preserveConfirmation:self.desktopAgent.awaitingConfirmation)
+        }
         desktopAgent.onSwitch = { [weak self] target,_ in self?.driveScout(to:target) }
-        audio.onFailure = { [weak self] message in self?.conversationActive=false;self?.update("error", message) }
+        audio.onFailure = { [weak self] message in self?.stop();self?.update("error", message) }
         audio.onStatus = { [weak self] message in
             guard let self else { return }
             if message.hasPrefix("Streaming Phonon") { self.update("speaking", self.reply) }
@@ -445,7 +459,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     @objc private func show() { panel.orderFrontRegardless() }
     @objc private func quit() { NSApplication.shared.terminate(nil) }
     @objc private func stop() {endConversation();desktopAgent.cancelActions()}
-    private func endConversation(preserveGreeting:Bool=false) {
+    private func endConversation(preserveGreeting:Bool=false,preserveMicrophone:Bool=false) {
         cueTask?.cancel();cueTask=nil;robotSounds.stop()
         conversationActive=false
         generation += 1; responseTask?.cancel(); responseTask = nil
@@ -454,7 +468,8 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             else {parkRover()}
         }
         idleTimer?.invalidate(); idleTimer = nil
-        audio.end(); scout?.faceRequested=false; update("idle", "Microphone off")
+        if preserveMicrophone {audio.cancelTurn()} else {audio.end()}
+        scout?.faceRequested=false;update("idle",preserveMicrophone ? "Listening…" : "Microphone off")
     }
     @objc private func toggle() {
         if state == "listening" {stop();return}
@@ -492,15 +507,23 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             idleTimer = Timer.scheduledTimer(withTimeInterval: desktopAgent.awaitingConfirmation ? 120 : 35, repeats: false) { [weak self] _ in self?.stop() }
         } catch { update("error", error.localizedDescription) }
     }
+    private func interruptCurrentWork(preserveConfirmation:Bool=false) {
+        generation+=1;responseTask?.cancel();responseTask=nil
+        if !preserveConfirmation {desktopAgent.cancelActions()};audio.interruptSpeech()
+        update("listening","Stopped. What would you like instead?")
+        idleTimer?.invalidate()
+        idleTimer=Timer.scheduledTimer(withTimeInterval:35,repeats:false) {[weak self] _ in self?.stop()}
+    }
     private func respond(_ text: String) {
         lastRequest=text
         let normalized = TurnPolicy.normalized(text)
-        if ["stop", "cancel", "end conversation", "be quiet"].contains(normalized) { stop(); return }
+        if ["stop", "end conversation", "be quiet"].contains(normalized) {stop();return}
+        if ["wait","pause","cancel"].contains(normalized) {interruptCurrentWork();reply=normalized=="cancel" ? "Cancelled." : "Okay, paused.";audio.speak(reply);return}
         let keepFace=scout?.faceRequested ?? false, keepConversation=conversationActive
-        endConversation(preserveGreeting:true);scout?.faceRequested=keepFace;conversationActive=keepConversation
+        endConversation(preserveGreeting:true,preserveMicrophone:keepConversation);scout?.faceRequested=keepFace;conversationActive=keepConversation
         let ticket = generation
         update("thinking", text)
-        guard SystemLanguageModel.default.isAvailable else { update("error", "Apple’s local model is unavailable. Nothing was sent online."); return }
+        guard SystemLanguageModel.default.isAvailable else {stop();update("error", "Apple’s local model is unavailable. Nothing was sent online.");return}
         let active=NSWorkspace.shared.frontmostApplication
         let front=active?.bundleIdentifier == Bundle.main.bundleIdentifier ? FrontWindow.underlyingApp() : active
         if let front {rememberApp(front)}

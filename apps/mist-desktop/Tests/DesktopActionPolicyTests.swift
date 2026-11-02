@@ -5,10 +5,12 @@ import Foundation
             DesktopActionPolicy.risk(kind:kind,text:"Hello",key:key,element:ActionElement(ref:"@s1:e1",role:kind=="type" ? "textfield" : "button",name:label,value:value,path:"window/Test/"+label,protected:protected),goal:goal,appID:"fixture",modelRisk:false)
         }
         precondition(risk("click","Open details") == .ordinary)
-        for name in ["Delete test item","Empty Trash","Send","Publish","Pay","Continue","Save"] {precondition(risk("click",name) == .confirmation,name)}
+        for name in ["Delete test item","Empty Trash","Send","Publish","Pay","Continue","Save","Uninstall","Restart","Share","Upload"] {precondition(risk("click",name) == .confirmation,name)}
         precondition(risk("type","Draft") == .ordinary)
         precondition(risk("type","Draft","Existing content") == .confirmation)
         precondition(risk("type","Password") == .blocked)
+        precondition(risk("click","Allow") == .blocked)
+        precondition(risk("click","") == .confirmation,"An unlabeled control cannot silently perform a consequential action")
         precondition(risk("type","Draft","","","Type hello",true) == .blocked)
         precondition(risk("key","Draft","","cmd+q") == .blocked)
         precondition(risk("key","Draft","","return") == .confirmation)

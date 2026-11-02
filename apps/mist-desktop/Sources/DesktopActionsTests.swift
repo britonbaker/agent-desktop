@@ -18,7 +18,7 @@ import AppKit
         throw NSError(domain:"ActionTest",code:3,userInfo:[NSLocalizedDescriptionKey:"Fixture state did not reach the expected value."])
     }
     let agent=DesktopActions();agent.onStatus={print($0)}
-    print("NATURAL CLICK:",try await agent.run("Click the button that opens the details",app:target,authorized:{true}))
+    print("NATURAL CLICK:",try await agent.run("Click Open details",app:target,authorized:{true}))
     try await until {$0["details"] as? String=="Details open"}
     print("TYPE:",try await agent.run("Type hello rover into the Draft field",app:target,authorized:{true}))
     try await until {$0["draft"] as? String=="hello rover"}
@@ -28,6 +28,8 @@ import AppKit
     try await until {($0["scroll"] as? Double ?? 0)>0}
     let prompt=try await agent.run("Click Delete test item",app:target,authorized:{true});print("CONFIRMATION:",prompt)
     try check(agent.awaitingConfirmation && state()["deleted"] as? Int==0,"Destructive action must not run before confirmation")
+    do {_=try await agent.run("Click Open details",app:target,authorized:{false});throw NSError(domain:"ActionTest",code:6)} catch is CancellationError {}
+    try check(agent.awaitingConfirmation,"A cancelled older turn must not erase a newer pending confirmation")
     print("REVIEW:",try await agent.confirm("confirm action",authorized:{true}) ?? "missing")
     try check(agent.awaitingConfirmation && state()["deleted"] as? Int==0,"First approval must not mutate")
     print("APPROVED:",try await agent.confirm("do it now",authorized:{true}) ?? "missing")
