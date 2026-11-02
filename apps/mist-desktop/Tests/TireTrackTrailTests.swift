@@ -15,9 +15,12 @@ import CoreGraphics
         precondition(first.opacity(at:0.6)<0.3 && first.opacity(at:1.21)==0)
         let count=trail.marks.count
         trail.update(position:CGPoint(x:120,y:140),heading:.pi,scale:50,time:0.3)
-        precondition(trail.marks.count==count,"in-place wheel spin creates no sliding trail")
+        precondition(trail.marks.count>count,"Turning in place moves each tire along an arc and must leave scrub marks")
+        let afterTurn=trail.marks.count
+        trail.update(position:CGPoint(x:120,y:140),heading:.pi,scale:50,time:0.31)
+        precondition(trail.marks.count==afterTurn,"A stationary rover makes no new marks")
         trail.update(position:CGPoint(x:900,y:900),heading:0,scale:50,time:0.4)
-        precondition(trail.marks.count==count,"teleport must not draw a connecting trail")
+        precondition(trail.marks.count==afterTurn,"teleport must not draw a connecting trail")
         trail.expire(at:2);precondition(trail.marks.isEmpty)
         trail.clear();trail.update(position:.zero,heading:0,scale:50,time:3)
         trail.update(position:CGPoint(x:0,y:10),heading:0,scale:50,time:3.1,frontContact:false)
@@ -25,6 +28,6 @@ import CoreGraphics
         trail.clear();trail.update(position:.zero,heading:0,scale:50,time:4)
         trail.update(position:CGPoint(x:0,y:10),heading:0,scale:50,time:4.1,grounded:false)
         precondition(trail.marks.isEmpty)
-        print("PASS desktop tire contacts: fixed marks through turns, four wheel paths, independent fade, no spin/teleport/airborne trail, rear contact during climb")
+        print("PASS desktop tire contacts: fixed marks through turns, four wheel paths, independent fade, pivot-turn scrubs, no stationary/teleport/airborne trail, rear contact during climb")
     }
 }

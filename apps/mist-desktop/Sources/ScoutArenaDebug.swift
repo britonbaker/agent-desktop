@@ -7,6 +7,7 @@ private final class ArenaCanvas:NSView {
     var screenFrame=CGRect.zero,visible=CGRect.zero,arena=CGRect.zero
     var settings=ScoutWall.Settings(),scale=55.0
     var rover:(CGPoint,Double)?
+    var climb=0.0
     override var isOpaque:Bool {false}
     private func local(_ rect:CGRect)->CGRect {rect.offsetBy(dx:-screenFrame.minX,dy:-screenFrame.minY)}
     private func stroke(_ rect:CGRect,_ color:NSColor,_ width:CGFloat=1,_ dashed:Bool=false) {
@@ -36,7 +37,7 @@ private final class ArenaCanvas:NSView {
             for x in [-0.74,0.74] {for z in [-0.431,0.431] {
                 let point=CGPoint(x:center.x+(c*x+s*z)*scale,y:center.y+(-s*x+c*z)*scale)
                 let height=ScoutWall.height(at:point,scale:scale,area:arena,settings:settings)
-                (height>0.001 ? NSColor.systemOrange : NSColor.systemGreen).setFill()
+                (height>0.001 || (z>0 && climb>0.01) ? NSColor.systemOrange : NSColor.systemGreen).setFill()
                 NSBezierPath(ovalIn:CGRect(x:point.x-screenFrame.minX-4,y:point.y-screenFrame.minY-4,width:8,height:8)).fill()
             }}
         }
@@ -73,7 +74,7 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
     private var paused=false,right=false
     private var timer:Timer?
     private var scale=55.0
-    var sample:(()->(center:CGPoint,heading:Double,scale:Double)?)?
+    var sample:(()->(center:CGPoint,heading:Double,scale:Double,climb:Double)?)?
     var onChange:(()->Void)?,onPreview:((Bool)->Void)?,onPause:((Bool)->Void)?,onClose:(()->Void)?
     init(screen:NSScreen) {
         displayID=ScoutArena.id(screen)
@@ -146,7 +147,7 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         let s=ScoutArena.shared.settings(for:screen),rover=sample?()
         scale=rover?.scale ?? scale
         canvas.screenFrame=screen.frame;canvas.visible=screen.visibleFrame;canvas.arena=ScoutArena.shared.area(for:screen);canvas.settings=s;canvas.scale=scale
-        canvas.rover=rover.map {($0.center,$0.heading)};canvas.needsDisplay=true
+        canvas.rover=rover.map {($0.center,$0.heading)};canvas.climb=rover?.climb ?? 0;canvas.needsDisplay=true
         if overlay.frame != screen.frame {overlay.setFrame(screen.frame,display:false)}
         profile.settings=s;profile.scale=scale;profile.needsDisplay=true
         for key in ["left","right","top","bottom"] {values[key]?.stringValue="\(Int(sliders[key]?.doubleValue ?? 0)) pt"}
@@ -155,7 +156,7 @@ final class ScoutArenaDebug:NSObject,NSWindowDelegate {
         values["radius"]?.stringValue="\(Int(s.radius*scale)) pt";values["rise"]?.stringValue="\(Int(s.rise*100))%"
         if let rover {
             let p=ScoutWall.pose(center:rover.center,heading:rover.heading,scale:scale,area:canvas.arena,settings:s)
-            readout.stringValue=String(format:"Pitch %.1f° · Bank %.1f° · Rise %.1f pt\nDisplay %u · %.0f × %.0f pt",p.pitch*180/Double.pi,p.roll*180/Double.pi,p.height*scale,displayID,screen.frame.width,screen.frame.height)
+            readout.stringValue=String(format:"Pitch %.1f° · Bank %.1f° · Rise %.1f pt\nDisplay %u · %.0f × %.0f pt",(rover.climb>0 ? rover.climb : p.pitch)*180/Double.pi,p.roll*180/Double.pi,(rover.climb>0 ? p.rearHeight-0.472+0.472*cos(rover.climb)+0.431*sin(rover.climb) : p.height)*scale,displayID,screen.frame.width,screen.frame.height)
         }
     }
     func windowWillClose(_ notification:Notification) {timer?.invalidate();timer=nil;overlay.orderOut(nil);onClose?()}

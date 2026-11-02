@@ -15,7 +15,11 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     var windowSteps=UserDefaults.standard.object(forKey:"scoutWindowSteps") as? Bool ?? true
     var tracks=UserDefaults.standard.object(forKey:"scoutTracks") as? Bool ?? true
     var lampLift:Float=UserDefaults.standard.object(forKey:"scoutLampLift") as? Float ?? 1
+    var desktopPosition:CGPoint?
+    private var suspension=ScoutSuspension()
     var moving = false
+    var calibrationActive=false
+    var calibrationClimb:Float=0
     var wheeliePitch:Float=0
     var faceRequested = false
     var roofFace = false
@@ -85,7 +89,9 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let physical=number.map { CGDisplayScreenSize(CGDirectDisplayID($0.uint32Value)) } ?? .zero
         // EDID may omit physical size (virtual displays). Use a nominal 110 points/inch.
         let mmPerPoint=physical.width>0 ? physical.width/frame.width : 25.4/110
-        let origin=view.window?.frame.origin ?? CGPoint(x:frame.midX-150,y:frame.midY-200)
+        let nativeOrigin=view.window?.frame.origin ?? CGPoint(x:frame.midX-150,y:frame.midY-200)
+        let origin=ScoutMotionOrigin.resolve(desired:desktopPosition,native:nativeOrigin)
+        let residual=CGPoint(x:origin.x-nativeOrigin.x,y:origin.y-nativeOrigin.y)
         let center=CGPoint(x:origin.x+150-frame.minX,y:origin.y+200-frame.minY)
         if Date().timeIntervalSince(lastLidRead)>0.25 {
             lastLidRead=Date()
@@ -95,33 +101,41 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         let eye=camera.eye
         let headroom=Float(max(1,min(4,screen?.maximumExtendedDynamicRangeColorComponentValue ?? 1)))
         let wall=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? ScoutWall.Pose() : ScoutWall.pose(center:CGPoint(x:origin.x+150,y:origin.y+200),heading:Double(heading),scale:Double(camera.pointsPerUnit),area:screen.map {ScoutArena.shared.area(for:$0)} ?? frame,settings:screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
-        let frontPresented=lift>0.08 || renderedWheelie>0.12 || wall.pitch>0.12
+        let climbTravel=0.862*(1-cos(Double(calibrationClimb)))
+        let rearSupport:Double
+        if calibrationClimb>0 {
+            let point=CGPoint(x:origin.x+150+sin(Double(heading))*climbTravel*Double(camera.pointsPerUnit),y:origin.y+200+cos(Double(heading))*climbTravel*Double(camera.pointsPerUnit))
+            rearSupport=ScoutWall.pose(center:point,heading:Double(heading),scale:Double(camera.pointsPerUnit),area:screen.map {ScoutArena.shared.area(for:$0)} ?? frame,settings:screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings()).rearHeight
+        } else {rearSupport=wall.height}
+        let frontPresented=lift>0.08 || renderedWheelie>0.12 || wall.pitch>0.12 || calibrationClimb>0.12
         let showRoofFace = !frontPresented && (roofFace || ["listening","thinking","speaking"].contains(state))
         let terrainUniforms=terrain.uniforms(center:CGPoint(x:origin.x+150,y:origin.y+200),scale:Double(camera.pointsPerUnit))
         return [Float(width),Float(height),Float(camera.pointsPerUnit),Float(width)/300,
                 eye.x,eye.y,eye.z,Float(Date().timeIntervalSince(started)),
                 heading,distance+Float(balance.travel)*Float(camera.pointsPerUnit),["listening":Float(1),"thinking":2,"speaking":3,"error":5][state] ?? (moving ? 7 : 0),lift,
-                Float(Date().timeIntervalSince(entered)),headroom,wall.contact ? 0 : renderedWheelie,Float(balance.pitchCorrection),
+                Float(Date().timeIntervalSince(entered)),headroom,calibrationClimb>0 ? calibrationClimb : (wall.contact ? 0 : renderedWheelie),Float(balance.pitchCorrection),
                 Float(min(7,max(0,optics))),Float(min(3,max(0,paint))),Float(min(4,max(0,face))),lamps ? 1 : 0,
                 lampLift,shadow ? 1 : 0,tracks ? 1 : 0,showRoofFace ? 1 : 0,
-                Float(wall.pitch+terrainPitch),Float(wall.roll+terrainRoll),Float(wall.height+terrainPose.height),Float(balance.travel),
-                150,200,0,0]+terrainUniforms
+                Float((calibrationClimb>0 ? 0 : wall.pitch)+terrainPitch),Float(wall.roll+terrainRoll),Float(rearSupport+terrainPose.height),Float(balance.travel+climbTravel),
+                150+Float(residual.x),200+Float(residual.y),0,0]+terrainUniforms+[Float(suspension.pitch),Float(suspension.roll),Float(suspension.heave),0,Float(suspension.yawTravel),0,0,0]
     }
     func draw(in view: MTKView) {
         guard view.window?.isVisible == true else { return }
         let now=Date(),dt=Float(min(0.05,now.timeIntervalSince(previous)));previous=now
+        let position=ScoutMotionOrigin.resolve(desired:desktopPosition,native:view.window?.frame.origin ?? .zero)
+        suspension.step(position:position,heading:Double(heading),elapsed:Double(dt),reducedMotion:NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         let wheelieTarget=NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? Float(0) : wheeliePitch
         if NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {renderedWheelie=0;wheelieVelocity=0}
         else {
             wheelieVelocity+=((wheelieTarget-renderedWheelie)*100-wheelieVelocity*20)*dt
             renderedWheelie=max(0,min(0.85,renderedWheelie+wheelieVelocity*dt))
         }
-        let target: Float = faceRequested && !moving && ["listening","thinking","speaking"].contains(state) ? 1 : 0
+        let target: Float = faceRequested && !moving && !calibrationActive && ["listening","thinking","speaking"].contains(state) ? 1 : 0
         balance.step(Double(dt),engaged:target>0.5,reducedMotion:NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
         lift=Float(balance.presentation)
-        view.preferredFramesPerSecond = moving || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 30 : 12
+        view.preferredFramesPerSecond = moving || suspension.active || renderedWheelie>0.001 || wheeliePitch>0.001 || abs(target-lift) > 0.002 || state != "idle" ? 60 : 12
         if let window=view.window {
-            let center=CGPoint(x:window.frame.minX+150,y:window.frame.minY+200)
+            let center=CGPoint(x:position.x+150,y:position.y+200)
             let scale=Double(uniforms(width:600,height:760)[2])
             if !windowSteps || NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {terrain=ScoutWindowSteps();terrainPose=ScoutWindowSteps.Pose();terrainPitch=0;terrainRoll=0;pitchSpeed=0;rollSpeed=0}
             else {
@@ -142,13 +156,13 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             }
             if shadow || lamps {
                 if groundOverlay==nil,let device=view.device {groundOverlay=ScoutGroundOverlay(device:device,queue:queue) {[weak self] texture,command,values in self?.encode(texture:texture,command:command,values:values)}}
-                groundOverlay?.update(window:window,values:uniforms(width:600,height:760))
+                groundOverlay?.update(window:window,values:uniforms(width:600,height:760),origin:position)
             } else {groundOverlay?.clear()}
             if tracks && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion {
                 if !trackTextureAttempted {trackTextureAttempted=true;if let images=try? trackStampImages() {trackOverlay=ScoutTrackOverlay(images:images)}}
                 let scale=Double(uniforms(width:600,height:760)[2])
-                let wall=ScoutWall.pose(center:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,area:window.screen.map {ScoutArena.shared.area(for:$0)} ?? .zero,settings:window.screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
-                trackOverlay?.update(position:CGPoint(x:window.frame.minX+150,y:window.frame.minY+200),heading:Double(heading),scale:scale,frontContact:renderedWheelie<0.05 && abs(wall.pitch+terrainPitch)<0.05,grounded:lift<0.05 && abs(wall.roll+terrainRoll)<0.05,window:window,belowWindow:(shadow || lamps) ? groundOverlay?.windowNumber : nil)
+                let wall=ScoutWall.pose(center:CGPoint(x:position.x+150,y:position.y+200),heading:Double(heading),scale:scale,area:window.screen.map {ScoutArena.shared.area(for:$0)} ?? .zero,settings:window.screen.map {ScoutArena.shared.settings(for:$0)} ?? ScoutWall.Settings())
+                trackOverlay?.update(position:CGPoint(x:position.x+150,y:position.y+200),heading:Double(heading),scale:scale,frontContact:lift<0.05 && calibrationClimb<0.05 && renderedWheelie<0.05 && abs(wall.pitch+terrainPitch)<0.05,grounded:abs(wall.roll+terrainRoll)<0.05,window:window,belowWindow:(shadow || lamps) ? groundOverlay?.windowNumber : nil)
             } else {trackOverlay?.clear()}
         }
         guard let drawable=view.currentDrawable,let command=queue.makeCommandBuffer() else { return }
@@ -190,13 +204,15 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
     func greetingPreview(directory:String) throws {
         try FileManager.default.createDirectory(atPath:directory,withIntermediateDirectories:true)
         var wheelFrames:[Data]=[],balanceFrames:[Data]=[],stepFrames:[Data]=[]
-        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("step-approach",0,0),("step-on",0,0),("step-down",0,0),("step-corner",0,0),("balance-settled",0,0),("balance-tapped",0,0),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0),("lighting-north",0,0),("lighting-east",0,0),("lighting-south",0,0),("lighting-west",0,0)] {
+        for (name,pitch,travel) in [("rest",Float(0),Float(0)),("lift",0.3,0),("wheelie",0.54,0),("drive-start",0,0),("drive-turned",0,20),("suspension-loaded",0,0),("pivot-turn",0,0),("step-approach",0,0),("step-on",0,0),("step-down",0,0),("step-corner",0,0),("balance-settled",0,0),("balance-tapped",0,0),("roof-face",0,0),("roof-face-speaking",0,0),("wall-bank",0,0),("wall-corner",0,0),("lighting-north",0,0),("lighting-east",0,0),("lighting-south",0,0),("lighting-west",0,0)] {
             let lighting=name.hasPrefix("lighting-"),w=lighting ? 1000 : 600,h=lighting ? 1000 : 760
             let desc=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:w,height:h,mipmapped:false)
             desc.usage=[.renderTarget,.shaderRead];desc.storageMode = .shared
             guard let texture=view.device?.makeTexture(descriptor:desc),let command=queue.makeCommandBuffer() else {throw NSError(domain:"ScoutPreview",code:1)}
             var values=uniforms(width:w,height:h);values[8] = .pi;values[11]=0;values[14]=pitch;values[9]=travel;values[7]=1.5;values[12]=1.5
             if name.hasPrefix("drive-") {values[10]=7;values[22]=0}
+            if name=="suspension-loaded" {values[76]=0.04;values[77]=0.05;values[78] = -0.01}
+            if name=="pivot-turn" {values[80]=1.2;values[77]=0.025}
             if name.hasPrefix("step-") {
                 let scene=ScoutWindowSteps(frontToBack:[CGRect(x:300,y:200,width:400,height:400),CGRect(x:0,y:0,width:1000,height:800)])
                 let locations:[String:Double]=["step-approach":295,"step-on":400,"step-down":705,"step-corner":295]
@@ -238,6 +254,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
             guard let png=bitmap.representation(using:.png,properties:[:]) else {throw NSError(domain:"ScoutPreview",code:3)}
             try png.write(to:URL(fileURLWithPath:directory).appendingPathComponent(name+".png"))
             if name.hasPrefix("drive-") {wheelFrames.append(Data(bytes:output,count:w*h*4))}
+            if name=="suspension-loaded" {values[76]=0.04;values[77]=0.05;values[78] = -0.01}
+            if name=="pivot-turn" {values[80]=1.2;values[77]=0.025}
             if name.hasPrefix("step-") {
                 let scene=ScoutWindowSteps(frontToBack:[CGRect(x:300,y:200,width:400,height:400),CGRect(x:0,y:0,width:1000,height:800)])
                 let locations:[String:Double]=["step-approach":295,"step-on":400,"step-down":705,"step-corner":295]
@@ -247,6 +265,8 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
                 values[8]=Float(heading);values[24]=Float(pose.pitch);values[25]=Float(pose.roll);values[26]=Float(pose.height)
                 values.replaceSubrange(32..<76,with:scene.uniforms(center:center,scale:Double(values[2])))
             }
+            if name=="suspension-loaded" {values[76]=0.04;values[77]=0.05;values[78] = -0.01}
+            if name=="pivot-turn" {values[80]=1.2;values[77]=0.025}
             if name.hasPrefix("step-") {stepFrames.append(Data(bytes:output,count:w*h*4))}
             if name.hasPrefix("balance-") {balanceFrames.append(Data(bytes:output,count:w*h*4))}
         }
@@ -313,6 +333,36 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         print("PASS fixed world-light shadow at four headings; beams extend beyond body window and fade before receiver edge; ground GPU max ms:",worst)
     }
     /// Offscreen proof of shader compilation, nonempty geometry and EDR values.
+    private func suspensionContactTest() throws {
+        guard let device=view.device else {throw NSError(domain:"SuspensionProbe",code:1)}
+        let pipelineDescriptor=MTLRenderPipelineDescriptor()
+        pipelineDescriptor.vertexFunction=library.makeFunction(name:"scout_vertex")
+        pipelineDescriptor.fragmentFunction=library.makeFunction(name:"scout_suspension_probe")
+        pipelineDescriptor.colorAttachments[0].pixelFormat = .rgba16Float
+        let probe=try device.makeRenderPipelineState(descriptor:pipelineDescriptor)
+        let descriptor=MTLTextureDescriptor.texture2DDescriptor(pixelFormat:.rgba16Float,width:4,height:1,mipmapped:false)
+        descriptor.usage=[.renderTarget,.shaderRead];descriptor.storageMode = .shared
+        var baseline:[Float]=[]
+        for loaded in [false,true] {
+            guard let texture=device.makeTexture(descriptor:descriptor),let command=queue.makeCommandBuffer() else {throw NSError(domain:"SuspensionProbe",code:2)}
+            let pass=MTLRenderPassDescriptor();pass.colorAttachments[0].texture=texture
+            pass.colorAttachments[0].loadAction = .clear;pass.colorAttachments[0].storeAction = .store
+            guard let encoder=command.makeRenderCommandEncoder(descriptor:pass) else {throw NSError(domain:"SuspensionProbe",code:3)}
+            var values=uniforms(width:4,height:1)
+            values[76]=loaded ? 0.04 : 0;values[77]=loaded ? 0.05 : 0;values[78]=loaded ? -0.01 : 0
+            encoder.setRenderPipelineState(probe)
+            values.withUnsafeBytes {encoder.setFragmentBytes($0.baseAddress!,length:$0.count,index:0)}
+            encoder.drawPrimitives(type:.triangle,vertexStart:0,vertexCount:3);encoder.endEncoding()
+            command.commit();command.waitUntilCompleted();if let error=command.error {throw error}
+            var raw=[UInt16](repeating:0,count:16)
+            raw.withUnsafeMutableBytes {texture.getBytes($0.baseAddress!,bytesPerRow:32,from:MTLRegionMake2D(0,0,4,1),mipmapLevel:0)}
+            let contacts=(0..<4).map {Float(Float16(bitPattern:raw[$0*4]))}
+            if loaded {
+                guard zip(baseline,contacts).allSatisfy({abs($0-$1)<0.001}) else {throw NSError(domain:"SuspensionProbe",code:4,userInfo:[NSLocalizedDescriptionKey:"Suspension moved tire contacts: \(baseline), \(contacts)"])}
+            } else {baseline=contacts}
+        }
+        print("PASS native shader keeps all four tire contacts fixed under combined suspension pitch, roll and compression")
+    }
     private func surfaceHeightTest() throws {
         let scene=ScoutWindowSteps(frontToBack:[CGRect(x:300,y:200,width:400,height:400),CGRect(x:0,y:0,width:1000,height:800)]),center=CGPoint(x:300,y:400),scale=55.0
         let descriptor=MTLRenderPipelineDescriptor()
@@ -384,5 +434,6 @@ final class ScoutRenderer: NSObject, MTKViewDelegate {
         print("PASS native Scout: \(covered) solid pixels, \(bright) EDR channels above 1.0")
         try wallBoundaryTest()
         try surfaceHeightTest()
+        try suspensionContactTest()
     }
 }

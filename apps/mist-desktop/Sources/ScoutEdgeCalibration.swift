@@ -5,6 +5,19 @@ import CoreGraphics
 /// Parameter derivatives vanish at the ends, so reversing never snaps the heading.
 struct ScoutEdgeCalibration {
     static let period=7.2
+    /// Continue onto the curve once the front tire's leading tread reaches it.
+    /// The rear axle remains the support pivot, rather than lifting the whole rover.
+    static func climb(center:CGPoint,heading:Double,right:Bool,area:CGRect,scale:Double,settings:ScoutWall.Settings)->Double {
+        guard scale>0 else {return 0}
+        let s=settings.sanitized(),radius=s.radius*scale,direction=right ? 1.0 : -1.0
+        let alignment=max(0,direction*sin(heading))
+        guard alignment>0.6 else {return 0}
+        let leading=center.x+sin(heading)*0.726*scale
+        let distance=right ? area.maxX-leading : leading-area.minX
+        let run=min(radius*0.96,max(0,radius-distance))
+        let tangent=atan2(s.rise*run,sqrt(max(0.001,radius*radius-run*run)))
+        return min(0.72,tangent)*alignment*alignment
+    }
     static func pose(time:Double,right:Bool,area:CGRect,scale:Double,settings:ScoutWall.Settings=ScoutWall.Settings())->(center:CGPoint,heading:Double,forward:Bool,moving:Bool) {
         let phase=max(0,time).truncatingRemainder(dividingBy:period)
         let forward=phase<period/2

@@ -12,7 +12,8 @@ struct RoverDrive {
     var braking = cruiseBraking
     var jerk = cruiseJerk
     private(set) var currentAcceleration=0.0
-    mutating func park() {target=nil;speed=0;currentAcceleration=0}
+    private(set) var turnRate=0.0
+    mutating func park() {target=nil;speed=0;currentAcceleration=0;turnRate=0}
     /// Reserve distance to reverse positive torque, apply braking and absorb controller response.
     private func stoppingDistance(speed:Double)->Double {
         let j=max(1,jerk),b=max(1,braking),a=max(0,currentAcceleration)
@@ -31,7 +32,10 @@ struct RoverDrive {
             var turn=atan2(dx,dy)-heading
             while turn > .pi {turn-=2 * .pi}
             while turn < -.pi {turn+=2 * .pi}
-            heading+=min(3.8*dt,max(-3.8*dt,turn))
+            let wantedTurn=min(3.8,max(-3.8,turn*8))
+            turnRate+=min(18*dt,max(-18*dt,wantedTurn-turnRate))
+            let rotation=turnRate*dt
+            if rotation*turn>=0 && abs(rotation)>abs(turn) {heading+=turn;turnRate=0} else {heading+=rotation}
             // Solve a braking envelope including the time to reverse motor torque.
             var low=0.0,high=maximumSpeed
             for _ in 0..<12 {

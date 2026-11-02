@@ -591,7 +591,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         }
     }
     @objc private func parkRover() {
-        edgeLoopTimer?.invalidate();edgeLoopTimer=nil;edgeDebug?.setMotionPaused(true)
+        edgeLoopTimer?.invalidate();edgeLoopTimer=nil;scout?.calibrationActive=false;scout?.calibrationClimb=0;edgeDebug?.setMotionPaused(true)
         scout?.roofFace=false
         greetingTimer?.invalidate();greetingTimer=nil;greetingRelease=nil;greetingArrival=nil;scout?.wheeliePitch=0
         isWandering=false;nextWander=Date().addingTimeInterval(Double.random(in:6...11))
@@ -663,7 +663,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let debug=ScoutArenaDebug(screen:screen)
         debug.sample={ [weak self] in
             guard let self,self.panel.screen.map({ScoutArena.id($0)})==ScoutArena.id(screen) else {return nil}
-            return (CGPoint(x:self.panel.frame.minX+150,y:self.panel.frame.minY+200),self.rover.heading,Double(self.scout?.uniforms(width:600,height:760)[2] ?? 55))
+            return (CGPoint(x:self.panel.frame.minX+150,y:self.panel.frame.minY+200),self.rover.heading,Double(self.scout?.uniforms(width:600,height:760)[2] ?? 55),Double(self.scout?.calibrationClimb ?? 0))
         }
         debug.onChange={ [weak self] in
             guard let self else {return};if self.edgeLoopTimer != nil {return};self.parkRover();self.panel.setFrameOrigin(self.bounded(self.panel.frame.origin));self.rover.position=self.panel.frame.origin;self.wanderHome=self.rover.position;self.sendDrivePose()
@@ -674,7 +674,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             if !paused && self.edgeLoopTimer==nil {self.startArenaLoop(right:self.edgeLoopRight)}
         }
         debug.onClose={ [weak self] in
-            self?.edgeLoopTimer?.invalidate();self?.edgeLoopTimer=nil;self?.rover.park();self?.sendDrivePose()
+            self?.edgeLoopTimer?.invalidate();self?.edgeLoopTimer=nil;self?.scout?.calibrationActive=false;self?.scout?.calibrationClimb=0;self?.rover.park();self?.sendDrivePose()
             self?.scout?.windowSteps=UserDefaults.standard.object(forKey:"scoutWindowSteps") as? Bool ?? true
             if self?.greetingTimer != nil {self?.greetingRelease=Date()}
             self?.edgeDebug=nil
@@ -683,7 +683,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func startArenaLoop(right:Bool) {
         guard let screen=NSScreen.screens.first(where:{CGDisplayIsBuiltin(ScoutArena.id($0)) != 0}),companionID=="scout" else {return}
-        parkRover();edgeLoopRight=right;edgeLoopPaused=false;edgeDebug?.setMotionPaused(false)
+        parkRover();edgeLoopRight=right;edgeLoopPaused=false;scout?.calibrationActive=true;edgeDebug?.setMotionPaused(false)
         var age=0.0,last=Date()
         let scale=Double(scout?.uniforms(width:600,height:760)[2] ?? 55)
         let initial=ScoutEdgeCalibration.pose(time:0,right:right,area:ScoutArena.shared.area(for:screen),scale:scale,settings:ScoutArena.shared.settings(for:screen))
@@ -691,7 +691,7 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
         let clock=Timer(timeInterval:1/60,repeats:true) { [weak self] timer in
             guard let self,self.edgeDebug != nil else {timer.invalidate();return}
             let now=Date(),dt=min(0.05,max(0,now.timeIntervalSince(last)));last=now
-            guard !self.edgeLoopPaused,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {self.rover.position=self.bounded(self.rover.position);self.panel.setFrameOrigin(self.rover.position);self.rover.speed=0;self.sendDrivePose();return}
+            guard !self.edgeLoopPaused,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {self.rover.position=self.bounded(self.rover.position);self.panel.setFrameOrigin(self.rover.position);self.rover.speed=0;self.updateArenaClimb(right:right,screen:screen);self.sendDrivePose();return}
             age+=dt
             let scale=Double(self.scout?.uniforms(width:600,height:760)[2] ?? 55),settings=ScoutArena.shared.settings(for:screen),area=ScoutArena.shared.area(for:screen)
             let pose=ScoutEdgeCalibration.pose(time:age,right:right,area:area,scale:scale,settings:settings)
@@ -701,9 +701,16 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
             let dx=self.rover.position.x-old.x,dy=self.rover.position.y-old.y
             self.rover.distance=max(0,self.rover.distance+dx*sin(pose.heading)+dy*cos(pose.heading))
             self.rover.speed=dt>0 ? hypot(dx,dy)/dt : 0
-            self.panel.setFrameOrigin(self.rover.position);self.refreshControlPlacement();self.sendDrivePose()
+            self.panel.setFrameOrigin(self.rover.position);self.updateArenaClimb(right:right,screen:screen);self.refreshControlPlacement();self.sendDrivePose()
         }
         edgeLoopTimer=clock;RunLoop.main.add(clock,forMode:.common)
+    }
+    private func updateArenaClimb(right:Bool,screen:NSScreen) {
+        let scale=Double(scout?.uniforms(width:600,height:760)[2] ?? 55)
+        let settings=ScoutArena.shared.settings(for:screen),previous=Double(scout?.calibrationClimb ?? 0)
+        let climb=ScoutEdgeCalibration.climb(center:CGPoint(x:panel.frame.minX+150,y:panel.frame.minY+200),heading:rover.heading,right:right,area:ScoutArena.shared.area(for:screen),scale:scale,settings:settings)
+        rover.distance=max(0,rover.distance+(climb-previous)*settings.radius*scale)
+        scout?.calibrationClimb=Float(climb)
     }
     @objc private func greetScout() {
         guard companionID == "scout",scout != nil,!NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {return}
@@ -772,9 +779,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
     }
     private func startDriveTimer() {
         guard driveTimer == nil else { return }
-        driveTimer = Timer.scheduledTimer(withTimeInterval:1/60,repeats:true) { [weak self] timer in
+        var lastTick=ProcessInfo.processInfo.systemUptime
+        let clock=Timer(timeInterval:1/60,repeats:true) { [weak self] timer in
             guard let self else { timer.invalidate(); return }
-            let moving = self.rover.step(1/60)
+            let now=ProcessInfo.processInfo.systemUptime,elapsed=now-lastTick;lastTick=now
+            let moving = self.rover.step(elapsed)
             self.rover.position = self.bounded(self.rover.position)
             self.panel.setFrameOrigin(self.rover.position); self.sendDrivePose()
             if !moving {
@@ -786,10 +795,11 @@ final class RoveDelegate: NSObject, NSApplicationDelegate, WKScriptMessageHandle
                 else { self.rover.target = self.driveRoute.removeFirst() }
             }
         }
+        driveTimer=clock;RunLoop.main.add(clock,forMode:.common)
     }
     private func sendDrivePose() {
         guard ready,companionID == "scout" else { return }
-        scout?.heading=Float(rover.heading);scout?.distance=Float(rover.distance);scout?.moving=rover.speed>1
+        scout?.desktopPosition=rover.position;scout?.heading=Float(rover.heading);scout?.distance=Float(rover.distance);scout?.moving=rover.speed>1
         if scout == nil {web.evaluateJavaScript("window.roveDrive?.(\(rover.heading),\(rover.speed),\(rover.distance))",completionHandler:nil)}
     }
     private func move(_ dx: Double, _ dy: Double) {

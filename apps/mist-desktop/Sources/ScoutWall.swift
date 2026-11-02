@@ -38,7 +38,7 @@ struct ScoutWall {
         return (radius-sqrt(max(0,radius*radius-run*run)))/scale*s.rise
     }
     struct Pose {
-        var pitch=0.0,roll=0.0,height=0.0
+        var pitch=0.0,roll=0.0,height=0.0,rearHeight=0.0
         var contact:Bool {height>0.0001}
     }
     /// The box boundary contains the full tires, not just their axle/contact centers.
@@ -69,6 +69,6 @@ struct ScoutWall {
         // Least-squares contact plane: an oblique approach banks and pitches.
         let pitch=atan(((fl+fr)-(rl+rr))/(4*0.431))
         let roll=atan(((fr+rr)-(fl+rl))/(4*0.74))
-        return Pose(pitch:pitch,roll:roll,height:(fl+fr+rl+rr)/4)
+        return Pose(pitch:pitch,roll:roll,height:(fl+fr+rl+rr)/4,rearHeight:(rl+rr)/2)
     }
 }

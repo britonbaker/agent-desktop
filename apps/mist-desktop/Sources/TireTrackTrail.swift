@@ -22,12 +22,14 @@ struct TireTrackTrail {
         defer {previous=(position,heading)}
         guard let old=previous else {return}
         let dx=position.x-old.position.x,dy=position.y-old.position.y,length=hypot(dx,dy)
-        guard grounded,length>0.01,length<120 else {if length>=120 || !grounded {residual=0};return}
+        guard grounded,length<120 else {residual=0;return}
         var turn=heading-old.heading
         while turn > .pi {turn-=2 * .pi};while turn < -.pi {turn+=2 * .pi}
+        let contactTravel=max(length,abs(turn)*hypot(0.654,0.431)*scale)
+        guard contactTravel>0.00001 else {return}
         var travel=2-residual
-        while travel<=length {
-            let fraction=travel/length,angle=old.heading+turn*fraction
+        while travel<=contactTravel {
+            let fraction=travel/contactTravel,angle=old.heading+turn*fraction
             let center=CGPoint(x:old.position.x+dx*fraction,y:old.position.y+dy*fraction)
             for rear in [true,false] where rear || frontContact {
                 for side in [-1.0,1.0] {
@@ -38,7 +40,7 @@ struct TireTrackTrail {
             }
             travel+=2
         }
-        residual=(residual+length).truncatingRemainder(dividingBy:2)
+        residual=(residual+contactTravel).truncatingRemainder(dividingBy:2)
         if marks.count>2000 {marks.removeFirst(marks.count-2000)}
     }
 }

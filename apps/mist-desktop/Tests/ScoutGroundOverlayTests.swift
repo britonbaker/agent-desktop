@@ -26,6 +26,9 @@ import MetalKit
                     let groundCenter=CGPoint(x:receiver.receiverFrame.midX,y:receiver.receiverFrame.midY)
                     let tirePlaneCenter=CGPoint(x:body.frame.minX+150,y:body.frame.minY+200)
                     precondition(hypot(groundCenter.x-tirePlaneCenter.x,groundCenter.y-tirePlaneCenter.y)<0.01,"Shadow receiver shifted away from the body near a display edge")
+                    let fractional=CGPoint(x:body.frame.minX+0.35,y:body.frame.minY+0.65)
+                    receiver.update(window:body,values:[Float](repeating:0,count:32),origin:fractional)
+                    precondition(hypot(receiver.receiverWorldCenter.x-fractional.x-150,receiver.receiverWorldCenter.y-fractional.y-200)<0.001,"Preserve fractional ground alignment")
                     checked+=1
                 }
             }

@@ -6,11 +6,14 @@ original=(root/'Resources/scout-study-source.glsl').read_text()
 body=original[:original.index('// 5 x 7 column masks')]
 body=re.sub(r'\bpatch\b','groundPatch',body)
 body=re.sub(r'^precision .*?;\n|^uniform .*?;\n','',body,flags=re.M)
-body='vec3 worldToScout(vec3 p);\n'+body
+body='vec3 worldToScout(vec3 p);\nvec3 unsprungPoint(vec3 p);\n'+body
 for key in ['vec3(-.51,.90,.68)','vec3(-.55,.76,.47)']:
  body=body.replace('normalize('+key+')','normalize(worldToScout('+key+'))')
 body=body.replace('smoothstep(1.78,3.055,max(0.,rear))','smoothstep(.25,1.10,max(0.,rear))')
 body=body.replace('scKitRoll=scKitOn && mode==7.?angle-.106*sin(angle):0.;','scKitRoll=U.pose.y/(U.viewport.z*.295);')
+body=body.replace('float scKitWheelAngle(vec3 p,float neutral){return neutral+(p.z<0.?-scKitRoll:scKitRoll);}', 'float scKitWheelAngle(vec3 p,float neutral){float roll=(U.pose.y/U.viewport.z-U.wheelMotion.x*p.x)/.295;return neutral+(p.z<0.?-roll:roll);}')
+body=body.replace('    // Four chevron-tread tires.', '    vec3 chassisPoint=p;p=unsprungPoint(p);ax=abs(p.x);\n    // Four chevron-tread tires.')
+body=body.replace('    if(p.y<-.102) {', '    p=chassisPoint;ax=abs(p.x);\n    if(p.y<-.102) {')
 body=re.sub(r'float scoutTravel\(float age\)\{.*?\n}', 'float scoutTravel(float age){return max(0.,U.pose.y/U.viewport.z);}',body,flags=re.S)
 # Reuse the authored face ink on the existing roof glass; no separate face overlay.
 body=body.replace('vec3 roofNavigation(vec2 s,vec3 v){','float scoutLcdInk(vec2 cell,float age,vec2 look);\nvec3 roofNavigation(vec2 s,vec3 v){')
@@ -37,20 +40,30 @@ camera='''float desktopHeight(vec2 p) {
  }
  return h;
 }
-vec3 worldToScout(vec3 p) {
+vec3 worldToScoutBase(vec3 p) {
  float heading=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
  float c=cos(heading),s=sin(heading);p=vec3(c*p.x-s*p.z,p.y,s*p.x+c*p.z);
  float cr=cos(U.wall.y),sr=sin(U.wall.y);p=vec3(cr*p.x+sr*p.y,-sr*p.x+cr*p.y,p.z);
  float a=U.pose.w*1.30+U.options.z+U.options.w+U.wall.x,cx=cos(a),sx=sin(a);
  return vec3(p.x,cx*p.y-sx*p.z,sx*p.y+cx*p.z);
 }
+vec3 suspensionVector(vec3 p){
+ float c=cos(U.suspension.y),s=sin(U.suspension.y);p=vec3(c*p.x+s*p.y,-s*p.x+c*p.y,p.z);
+ c=cos(U.suspension.x);s=sin(U.suspension.x);return vec3(p.x,c*p.y-s*p.z,s*p.y+c*p.z);
+}
+vec3 suspensionPoint(vec3 p){p.y+=.15-U.suspension.z;return suspensionVector(p)-vec3(0.,.15,0.);}
+vec3 unsprungPoint(vec3 p){
+ p.y+=.15;float c=cos(U.suspension.x),s=sin(U.suspension.x);p=vec3(p.x,c*p.y+s*p.z,-s*p.y+c*p.z);
+ c=cos(U.suspension.y);s=sin(U.suspension.y);p=vec3(c*p.x-s*p.y,s*p.x+c*p.y,p.z);p.y+=U.suspension.z-.15;return p;
+}
+vec3 worldToScout(vec3 p){return suspensionVector(worldToScoutBase(p));}
 vec3 scoutPoint(vec3 p){
  float rise=U.wall.z-.767*(1.-cos(U.wall.x)*cos(U.wall.y));
- p=worldToScout(p-vec3(0.,rise,0.));
+ p=worldToScoutBase(p-vec3(0.,rise,0.));
  float a=U.pose.w*1.30+U.options.z+U.options.w,c=cos(a),s=sin(a);vec3 pivot=vec3(0.,-.472,-.431);
  float h=U.pose.x+atan(sin(3.14159265-U.pose.x),cos(3.14159265-U.pose.x))*U.pose.w;
- vec3 wheelTranslation=worldToScout(vec3(sin(h)*U.wall.w,0.,cos(h)*U.wall.w));
- return p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z)-wheelTranslation;
+ vec3 wheelTranslation=worldToScoutBase(vec3(sin(h)*U.wall.w,0.,cos(h)*U.wall.w));
+ return suspensionPoint(p+pivot-vec3(pivot.x,c*pivot.y-s*pivot.z,s*pivot.y+c*pivot.z)-wheelTranslation);
 }
 void scCamera(vec2 uv,vec2 orbit,out vec3 ro,out vec3 rd){
  vec3 ground=vec3(uv.x,-.767,uv.y);ro=scoutPoint(U.eye.xyz);rd=worldToScout(normalize(ground-U.eye.xyz));
@@ -70,6 +83,8 @@ layout(set=0,binding=0,std140) uniform NativeUniforms {
  vec4 surfaces[8]; // desktop rectangles in model coordinates
  vec4 elevations[2];
  vec4 terrain; // surface count, edge ramp width, corner radius, reserved
+ vec4 suspension; // chassis pitch, bank, compression, reserved
+ vec4 wheelMotion; // unwrapped yaw travel, reserved
 } U;
 #define uResolution U.viewport.xy
 #define uEvent U.pose.z
@@ -117,13 +132,14 @@ void main(){
  vec3 color=vec3(0.);float coverage=hit.y>.5?1.:0.;
  if(coverage>0.){
   vec3 p=ro+rd*depth,n=studyNormal(p,style),v=-rd;
+  vec3 axle=unsprungPoint(p);bool tire=(hit.y>=4.&&hit.y<=6.)||((hit.y==11.||hit.y==12.)&&abs(axle.x)>.48&&abs(axle.y+.472)<.31&&abs(abs(axle.z)-.431)<.31);
   if(hit.y==3.&&n.z>.94)color=scLCD(p+v*((scGlass-p.z)/v.z),v,scKitFaceMode(U.pose.z),U.options.x,vec2(0.));
   else if(hit.y>=110.){
    color=kitDisplaySurface(p,n,v,hit.y,style);
    if(kitDisplayLiveGlass(p,n,hit.y,style))color=kitDisplayGlassRay(ro,rd,style);
   }else if(hit.y>=40.)color=kitPaintFinish(p,n,v,hit.y,liftLampSurface(p,n,v,hit.y,power),uStyle);
   else if(hit.y>=19.5)color=headFinish(p,n,v,hit.y,style,power);
-  else color=kitPaintFinish(p,n,v,hit.y,scHousing(p,n,v,hit.y),uStyle)+headBounce(p,n,style,power);
+  else color=kitPaintFinish(p,n,v,hit.y,scHousing(tire?axle:p,n,v,hit.y),uStyle)+headBounce(p,n,style,power);
   color+=studyGlare(ro,rd,depth,style,power);
  }
  // Use the source's tire lugs and chassis shadow on a transparent display receiver.
@@ -176,6 +192,10 @@ fragment float4 scout_track_stamp(float4 position [[position]],constant float4& 
 }
 """
 metal+=r"""
+fragment float4 scout_suspension_probe(float4 position [[position]],constant NativeUniforms& U [[buffer(0)]]) {
+ int i=min(3,int(position.x));float3 p=float3(i<2?-.654:.654,-.767,i%2==0?-.431:.431);
+ float3 sprung=suspensionPoint(p,U);bool kit=true;float2 yaw=float2(1.,0.);return float4(scScene(sprung,kit,yaw,U).x,0.,0.,1.);
+}
 fragment float4 scout_surface_probe(float4 position [[position]],constant NativeUniforms& U [[buffer(0)]]) {
  float2 probes[6]={float2(-1.,0.),float2(0.,0.),float2(1.,0.),float2(5.,0.),float2(0.,-3.54545),float2(.2,-3.34545)};
  float2 p=probes[min(5,int(position.x))];
